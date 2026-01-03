@@ -48,13 +48,16 @@ minichat - Python 3.13 기반 실시간 채팅 애플리케이션. Django와 Cha
 
 ### Architecture Patterns
 
-[HackSoft Django Styleguide](https://github.com/HackSoftware/Django-Styleguide) 기반
+Fat Model + Thin View 패턴을 사용하여 비즈니스 로직을 Model 레이어에 집중한다.
 
-**서비스 레이어** (`services.py`): 쓰기 작업 담당. 네이밍은 `<entity>_<action>` (예: user_create, order_cancel)
+**Model 레이어**: 모든 비즈니스 로직 배치
+- Custom Manager: 조회(get_by_*) 및 생성(create_*) 로직
+- Model 메서드: 인스턴스 관련 비즈니스 로직 (예: User.login())
+- Private 메서드: 보조 기능 (_resize_image 등)
 
-**셀렉터** (`selectors.py`): 읽기 작업 담당. 네이밍은 `<entity>_list`, `<entity>_get`
+**Form 레이어**: 유효성 검사 담당, ModelForm의 save()에서 Model Manager 호출
 
-**비즈니스 로직 배치 금지**: views, serializers, forms, model.save(), signals, custom managers/querysets
+**View 레이어 (Thin View)**: HTTP 요청/응답 처리만 담당, 비즈니스 로직 직접 구현 금지
 
 ### Testing Strategy
 
