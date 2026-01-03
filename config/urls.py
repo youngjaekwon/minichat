@@ -11,6 +11,7 @@ from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("users/", include("apps.users.urls")),
 ]
 
 # Debug Toolbar (개발 환경에서만)

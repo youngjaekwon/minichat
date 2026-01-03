@@ -77,17 +77,18 @@ project/
 ├── apps/                       # Django 앱들
 │   └── <app_name>/
 │       ├── __init__.py
-│       ├── models.py           # 데이터 모델만
-│       ├── services.py         # 쓰기 비즈니스 로직
-│       ├── selectors.py        # 읽기 비즈니스 로직
+│       ├── models.py           # 데이터 모델 + 비즈니스 로직 (Fat Model)
+│       ├── forms.py            # 폼 (ModelForm + save() 메서드)
+│       ├── views.py            # 뷰 (Thin View - HTTP 처리만)
 │       ├── apis.py             # API 엔드포인트
 │       ├── serializers.py      # 입출력 직렬화
 │       ├── urls.py
 │       ├── admin.py
 │       └── tests/
 │           ├── __init__.py
-│           ├── test_services.py
-│           ├── test_selectors.py
+│           ├── test_models.py
+│           ├── test_forms.py
+│           ├── test_views.py
 │           └── test_apis.py
 │
 ├── templates/                  # 전역 템플릿
@@ -159,19 +160,26 @@ future → standard library → third-party → Django → local 순서로 정�
 
 ## 아키텍처 패턴
 
-[HackSoft Django Styleguide](https://github.com/HackSoftware/Django-Styleguide) 기반으로 비즈니스 로직을 분리한다.
+Fat Model + Thin View 패턴을 사용하여 비즈니스 로직을 Model 레이어에 집중한다.
 
-### 서비스 레이어
+### Model 레이어
 
-쓰기 작업(생성, 수정, 삭제)을 담당하는 함수들을 `services.py`에 배치한다. 네이밍은 `<entity>_<action>` 패턴을 따른다 (예: user_create, order_cancel).
+모든 비즈니스 로직은 Model 레이어에 배치한다:
 
-### 셀렉터
+- **Custom Manager**: 조회(get_by_*) 및 생성(create_*) 로직을 Manager 메서드로 구현한다
+- **Model 메서드**: 인스턴스 관련 비즈니스 로직은 Model의 클래스/인스턴스 메서드로 구현한다 (예: User.login())
+- **Private 메서드**: 이미지 리사이징 등 보조 기능은 Manager의 private 메서드(_resize_image)로 구현한다
 
-읽기 작업(조회, 필터링)을 담당하는 함수들을 `selectors.py`에 배치한다. 네이밍은 `<entity>_list`, `<entity>_get` 패턴을 따른다.
+### Form 레이어
 
-### 비즈니스 로직 배치 금지 영역
+- ModelForm의 save() 메서드에서 Model Manager를 호출하여 객체를 생성한다
+- 유효성 검사만 담당하고, 복잡한 비즈니스 로직은 Model로 위임한다
 
-views, serializers, forms, model.save(), signals, custom managers/querysets에는 비즈니스 로직을 작성하지 않는다.
+### View 레이어 (Thin View)
+
+- HTTP 요청/응답 처리만 담당한다
+- `form.is_valid()` → `form.save()` 또는 Model 메서드 호출
+- 비즈니스 로직 직접 구현 금지
 
 ## TDD (테스트 주도 개발)
 

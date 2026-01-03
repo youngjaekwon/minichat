@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}회원가입 - minichat{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4">
+    <div class="max-w-md w-full space-y-8">
+        <div>
+            <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">회원가입</h2>
+            <p class="mt-2 text-center text-sm text-gray-600">
+                이미 계정이 있으신가요?
+                <a href="{% url 'users:login' %}" class="font-medium text-teal-600 hover:text-teal-500">로그인</a>
+            </p>
+        </div>
+
+        {% if form.non_field_errors %}
+        <div class="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
+            {% for error in form.non_field_errors %}
+            <p>{{ error }}</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <form class="mt-8 space-y-6" method="POST" enctype="multipart/form-data">
+            {% csrf_token %}
+
+            <div class="space-y-4">
+                <div>
+                    <label for="{{ form.email.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.email.label }}</label>
+                    <input id="{{ form.email.id_for_label }}" name="{{ form.email.name }}" type="email" required
+                        class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500"
+                        value="{{ form.email.value|default:'' }}">
+                    {% if form.email.errors %}
+                    <p class="mt-1 text-sm text-red-600">{{ form.email.errors.0 }}</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.name.label }}</label>
+                    <input id="{{ form.name.id_for_label }}" name="{{ form.name.name }}" type="text" required
+                        class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500"
+                        value="{{ form.name.value|default:'' }}">
+                    {% if form.name.errors %}
+                    <p class="mt-1 text-sm text-red-600">{{ form.name.errors.0 }}</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label for="{{ form.job_title.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.job_title.label }} (선택)</label>
+                    <input id="{{ form.job_title.id_for_label }}" name="{{ form.job_title.name }}" type="text"
+                        class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500"
+                        value="{{ form.job_title.value|default:'' }}">
+                </div>
+
+                <div>
+                    <label for="{{ form.profile_image.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.profile_image.label }} (선택)</label>
+                    <input id="{{ form.profile_image.id_for_label }}" name="{{ form.profile_image.name }}" type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100">
+                    <p id="profile-image-error" class="mt-1 text-sm text-red-600 hidden"></p>
+                    {% if form.profile_image.errors %}
+                    <p class="mt-1 text-sm text-red-600">{{ form.profile_image.errors.0 }}</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label for="{{ form.password.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.password.label }}</label>
+                    <input id="{{ form.password.id_for_label }}" name="{{ form.password.name }}" type="password" required
+                        class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">
+                    {% if form.password.errors %}
+                    <p class="mt-1 text-sm text-red-600">{{ form.password.errors.0 }}</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label for="{{ form.password_confirm.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.password_confirm.label }}</label>
+                    <input id="{{ form.password_confirm.id_for_label }}" name="{{ form.password_confirm.name }}" type="password" required
+                        class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500">
+                    {% if form.password_confirm.errors %}
+                    <p class="mt-1 text-sm text-red-600">{{ form.password_confirm.errors.0 }}</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div>
+                <button type="submit"
+                    class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-teal-500 hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500">
+                    가입하기
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function() {
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+    const fileInput = document.getElementById('{{ form.profile_image.id_for_label }}');
+    const errorEl = document.getElementById('profile-image-error');
+    const submitBtn = document.querySelector('button[type="submit"]');
+
+    fileInput.addEventListener('change', function() {
+        errorEl.textContent = '';
+        errorEl.classList.add('hidden');
+        submitBtn.disabled = false;
+
+        const file = this.files[0];
+        if (!file) return;
+
+        // 파일 타입 검증
+        if (!ALLOWED_TYPES.includes(file.type)) {
+            showError('지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WEBP만 허용)');
+            this.value = '';
+            return;
+        }
+
+        // 파일 크기 검증
+        if (file.size > MAX_FILE_SIZE) {
+            showError('이미지 파일이 너무 큽니다. (최대 10MB)');
+            this.value = '';
+            return;
+        }
+    });
+
+    function showError(message) {
+        errorEl.textContent = message;
+        errorEl.classList.remove('hidden');
+    }
+})();
+</script>
+{% endblock %}
