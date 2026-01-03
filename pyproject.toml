@@ -1,7 +1,90 @@
 [project]
 name = "minichat"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python 3.13 기반 채팅 애플리케이션"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "django>=5.1,<6.0",
+    "channels>=4.0,<5.0",
+    "daphne>=4.0,<5.0",
+    "channels-redis>=4.0,<5.0",
+    "psycopg[binary]>=3.1,<4.0",
+    "redis>=5.0,<6.0",
+    "celery>=5.3,<6.0",
+    "django-anymail>=10.0,<11.0",
+    "django-structlog>=8.0,<9.0",
+    "python-dotenv>=1.0,<2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-django>=4.5,<5.0",
+    "pytest-cov>=4.0,<5.0",
+    "factory-boy>=3.3,<4.0",
+    "ruff>=0.8,<1.0",
+    "pyright>=1.1,<2.0",
+    "pre-commit>=3.6,<4.0",
+    "django-debug-toolbar>=4.2,<5.0",
+    "django-stubs>=5.0,<6.0",
+]
+prod = [
+    "gunicorn>=21.0,<22.0",
+    "whitenoise>=6.6,<7.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+exclude = [
+    ".eggs",
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    "build",
+    "dist",
+    "migrations",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "DJ",     # flake8-django
+    "S",      # flake8-bandit (security)
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "S101",   # assert usage (allowed in tests)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]
+section-order = ["future", "standard-library", "django", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.lint.isort.sections]
+django = ["django"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+include = ["apps", "config"]
+exclude = ["**/migrations", "**/.venv"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["apps"]
+omit = ["*/migrations/*", "*/tests/*"]
