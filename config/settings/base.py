@@ -7,6 +7,7 @@ Django base settings for minichat project.
 import os
 from pathlib import Path
 
+import structlog
 from dotenv import load_dotenv
 
 # envs/env.local 또는 envs/env.production 등 환경별 파일 로드
@@ -46,7 +47,9 @@ THIRD_PARTY_APPS = [
     "django_structlog",
 ]
 
-LOCAL_APPS: list[str] = []
+LOCAL_APPS: list[str] = [
+    "apps.users",
+]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -172,9 +175,21 @@ CELERY_TIMEZONE = TIME_ZONE
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 
-# Logging with structlog
-import structlog
+# Custom User Model
+AUTH_USER_MODEL = "users.User"
 
+# Authentication Backends
+AUTHENTICATION_BACKENDS = [
+    "apps.users.backends.AuthBackend",
+]
+
+# Login/Logout
+LOGIN_URL = "users:login"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "users:login"
+
+
+# Logging with structlog
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

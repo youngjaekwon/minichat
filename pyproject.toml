@@ -15,6 +15,7 @@ dependencies = [
     "django-anymail>=10.0,<11.0",
     "django-structlog>=8.0,<9.0",
     "python-dotenv>=1.0,<2.0",
+    "pillow>=10.0,<11.0",
 ]
 
 [dependency-groups]
@@ -24,10 +25,10 @@ dev = [
     "pytest-cov>=4.0,<5.0",
     "factory-boy>=3.3,<4.0",
     "ruff>=0.8,<1.0",
-    "pyright>=1.1,<2.0",
+    "mypy>=1.13,<2.0",
     "pre-commit>=3.6,<4.0",
     "django-debug-toolbar>=4.2,<5.0",
-    "django-stubs>=5.0,<6.0",
+    "django-stubs[compatible-mypy]>=5.0,<6.0",
 ]
 prod = [
     "gunicorn>=21.0,<22.0",
@@ -63,6 +64,7 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "S101",   # assert usage (allowed in tests)
+    "S106",   # hardcoded password (allowed in tests)
 ]
 
 [tool.ruff.lint.isort]
@@ -72,13 +74,29 @@ section-order = ["future", "standard-library", "django", "third-party", "first-p
 [tool.ruff.lint.isort.sections]
 django = ["django"]
 
-[tool.pyright]
-pythonVersion = "3.13"
-typeCheckingMode = "basic"
-include = ["apps", "config"]
-exclude = ["**/migrations", "**/.venv"]
-reportMissingImports = true
-reportMissingTypeStubs = false
+[tool.mypy]
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main"]
+strict = false
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = false
+exclude = ["migrations", ".venv"]
+
+[[tool.mypy.overrides]]
+module = "*.migrations.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "PIL.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "config.settings.*"
+ignore_errors = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.local"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"
