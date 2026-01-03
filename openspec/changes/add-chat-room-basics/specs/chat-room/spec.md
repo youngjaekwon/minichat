@@ -6,7 +6,9 @@
 
 - `name`: 대화방 이름 (최대 100자, 빈 값 허용 - 그룹 대화용)
 - `participants`: 참여자 목록 (User M:N 관계)
+- `participant_count`: 참여자 수 (PositiveSmallIntegerField, 기본값 0, M2M 변경 시 자동 갱신)
 - `is_direct`: 1:1 대화 여부 (Boolean, 기본값 True)
+- `direct_chat_key`: 1:1 대화 고유 키 (unique, nullable - 그룹 대화는 null, 동시성 처리용)
 - `created_by`: 대화방 생성자 (User ForeignKey)
 - `created_at`: 생성 일시
 - `updated_at`: 수정 일시 (메시지 전송 시 갱신)
