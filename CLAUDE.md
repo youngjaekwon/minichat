@@ -139,6 +139,14 @@ pyproject.toml에서 의존성을 그룹으로 관리한다:
 
 Ruff를 사용하며 pre-commit 훅으로 자동 검사한다. 타입 체크는 Pyright를 사용한다.
 
+### 타입 힌트
+
+Python 3.10+ Union 문법을 사용한다:
+
+- `User | None` (O) vs `Optional[User]` (X)
+- `str | None` (O) vs `Optional[str]` (X)
+- Manager에 제네릭 타입 힌트 적용: `BaseUserManager[User]`
+
 ### 명명 규칙
 
 - 변수/함수: snake_case
@@ -152,7 +160,11 @@ future → standard library → third-party → Django → local 순서로 정�
 
 ### 모델 구조
 
-필드 정의 → class Meta → `__str__` → save() → get_absolute_url() → 커스텀 메서드 순서로 작성한다.
+필드 정의 → objects Manager → USERNAME_FIELD(인증 모델) → class Meta → `__str__` → save() → get_absolute_url() → 클래스 메서드 → 인스턴스 메서드 순서로 작성한다.
+
+### 상수 관리
+
+앱별 `constants.py` 파일에 매직 숫자와 설정값을 정의한다.
 
 ### 뷰/템플릿
 
@@ -166,9 +178,47 @@ Fat Model + Thin View 패턴을 사용하여 비즈니스 로직을 Model 레이
 
 모든 비즈니스 로직은 Model 레이어에 배치한다:
 
-- **Custom Manager**: 조회(get_by_*) 및 생성(create_*) 로직을 Manager 메서드로 구현한다
-- **Model 메서드**: 인스턴스 관련 비즈니스 로직은 Model의 클래스/인스턴스 메서드로 구현한다 (예: User.login())
-- **Private 메서드**: 이미지 리사이징 등 보조 기능은 Manager의 private 메서드(_resize_image)로 구현한다
+- **Custom QuerySet**: 체이닝 가능한 필터 로직을 QuerySet 메서드로 구현한다
+- **Custom Manager**: 조회(get_by\_\*) 및 생성(create\_\*) 로직을 Manager 메서드로 구현한다
+- **Model 메서드**: 인스턴스 관련 비즈니스 로직은 Model의 클래스/인스턴스 메서드로 구현한다
+- **Private 메서드**: 보조 기능은 Manager의 private 메서드(\_resize_image)로 구현한다
+
+#### QuerySet과 Manager 구분
+
+- **QuerySet 메서드**: "테이블 전체"에 대한 필터링/정렬 로직. 체이닝이 필요한 경우 반드시 QuerySet에 정의한다
+- **Manager 메서드**: 단일 객체 조회(get_by\_\*) 또는 생성(create\_\*) 로직. QuerySet을 반환하지 않는 경우 Manager에 정의한다
+- **Model 인스턴스 메서드**: "행(row) 수준" 로직. 특정 인스턴스에 대한 연산을 수행한다
+
+#### Custom QuerySet 패턴
+
+체이닝 가능한 쿼리 메서드는 Custom QuerySet에 정의하고 `as_manager()`로 Manager를 생성한다:
+
+- QuerySet 메서드는 반드시 QuerySet을 반환하여 체이닝을 보장한다
+- 고급 사용 시 `Manager.from_queryset()`으로 Manager와 QuerySet을 결합한다
+- QuerySet 메서드는 테스트, Django Admin, Generic View 등 어디서든 일관되게 사용할 수 있다
+
+#### QuerySet 메서드 명명 규칙
+
+- **필터 메서드**: 상태나 조건을 나타내는 형용사/명사형 사용
+  - `active()`, `published()`, `for_user(user)`, `created_after(date)`
+- **정렬 메서드**: `ordered_by_*` 형식 사용
+  - `ordered_by_created()`, `ordered_by_popularity()`
+
+#### Manager 메서드 명명 규칙
+
+- **Selector 메서드** (조회): `get_by_*` - None을 반환하여 안전한 조회 지원
+  - `get_by_email(email)` → `User | None`
+  - `get_by_id(user_id)` → `User | None`
+- **Creator 메서드** (생성): `create_*` - 객체 생성 및 관련 처리 수행
+  - `create_user(email, password, **kwargs)` → `User`
+
+#### Fat Model 주의사항
+
+Fat Model 패턴의 과도한 적용은 모델 비대화를 초래한다. 다음 원칙을 준수한다:
+
+- 복잡한 비즈니스 로직이 여러 모델에 걸쳐 있으면 별도 서비스 모듈(utils.py)로 분리를 고려한다
+- Model 메서드는 해당 인스턴스의 데이터만 다루도록 한다
+- 외부 API 호출 등 인프라 의존성은 Model에서 분리한다
 
 ### Form 레이어
 
@@ -180,6 +230,63 @@ Fat Model + Thin View 패턴을 사용하여 비즈니스 로직을 Model 레이
 - HTTP 요청/응답 처리만 담당한다
 - `form.is_valid()` → `form.save()` 또는 Model 메서드 호출
 - 비즈니스 로직 직접 구현 금지
+- 클래스 기반 뷰(CBV)를 기본으로 사용한다
+
+### CBV (Class-Based Views) 가이드라인
+
+SSR(Server Side Rendering) 환경에서 Django Generic CBV를 적극 활용한다.
+
+#### CBV vs FBV 선택 기준
+
+- **CBV 사용**: CRUD 작업, 반복적인 패턴, 코드 재사용이 필요한 경우
+- **FBV 사용**: 단순한 일회성 로직, CBV로 표현하기 복잡한 특수 케이스
+
+권장 접근법: Generic CBV로 시작하고, 필요시 일반 CBV로 전환, 정말 필요한 경우에만 FBV를 사용한다.
+
+#### 주요 Generic CBV와 용도
+
+- **ListView**: 모델 목록 표시 (페이지네이션 내장)
+- **DetailView**: 단일 객체 상세 표시
+- **CreateView**: 객체 생성 폼 처리
+- **UpdateView**: 객체 수정 폼 처리
+- **DeleteView**: 객체 삭제 확인 및 처리
+- **FormView**: 일반 폼 처리 (모델과 무관)
+- **TemplateView**: 단순 템플릿 렌더링
+
+#### Mixin 순서 (MRO)
+
+Mixin은 반드시 왼쪽에서 오른쪽 순서로 상속하며, View 클래스보다 먼저 선언한다:
+
+1. CsrfExemptMixin (사용 시 가장 왼쪽)
+2. LoginRequiredMixin
+3. PermissionRequiredMixin
+4. 기타 커스텀 Mixin
+5. Generic View (ListView, CreateView 등)
+
+#### 주요 오버라이드 메서드
+
+- **get_queryset()**: 목록 조회 시 QuerySet 커스터마이징. 단순한 경우 `queryset` 클래스 속성 사용
+- **get_context_data()**: 템플릿에 전달할 추가 컨텍스트 데이터. 반드시 `super().get_context_data(**kwargs)` 호출
+- **form_valid()**: 폼 검증 성공 시 추가 처리. 단순한 경우 `success_url` 클래스 속성 사용
+- **get_object()**: DetailView/UpdateView/DeleteView에서 객체 조회 커스터마이징
+- **dispatch()**: 뷰 실행 전 권한 검사 등 전처리
+
+#### 인증/권한 Mixin
+
+- **LoginRequiredMixin**: 로그인 필수 뷰에 적용
+- **PermissionRequiredMixin**: 특정 권한 필요 시 적용. `permission_required` 속성으로 권한 지정
+- **UserPassesTestMixin**: 커스텀 조건 검사 시 `test_func()` 메서드 오버라이드
+
+인증 Mixin은 권한 Mixin보다 먼저 배치한다. 인증되지 않은 사용자의 권한을 검사하는 것은 무의미하다.
+
+#### django-braces 활용
+
+추가적인 Mixin 기능이 필요한 경우 django-braces 패키지를 활용한다:
+
+- **FormValidMessageMixin**: 폼 성공 시 메시지 표시
+- **SetHeadlineMixin**: 템플릿에 headline 컨텍스트 전달
+- **SelectRelatedMixin**: select_related 자동 적용
+- **PrefetchRelatedMixin**: prefetch_related 자동 적용
 
 ## TDD (테스트 주도 개발)
 

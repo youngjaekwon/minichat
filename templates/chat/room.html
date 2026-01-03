@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% load chat_tags %}
+
+{% block title %}대화 - minichat{% endblock %}
+
+{% block body_class %}h-full overflow-hidden{% endblock %}
+
+{% block content %}
+<div class="h-screen flex bg-white">
+    <!-- 왼쪽 사이드바: 채팅방 목록 -->
+    <div class="w-80 border-r border-gray-200 flex flex-col">
+        <!-- 헤더 -->
+        <div class="p-4 border-b border-gray-200">
+            <div class="flex justify-end items-center">
+                <a href="{% url 'chat:new_conversation' %}"
+                   class="bg-blue-500 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-full transition">
+                    + 새로운 메세지
+                </a>
+            </div>
+        </div>
+
+        <!-- 검색창 -->
+        <div class="p-4 border-b border-gray-200">
+            <div class="relative">
+                <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </span>
+                <input type="text"
+                       placeholder="대화 검색하기"
+                       class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+            </div>
+        </div>
+
+        <!-- 채팅방 목록 -->
+        <div class="flex-1 overflow-y-auto">
+            {% if rooms %}
+                {% for room in rooms %}
+                <a href="{% url 'chat:room_detail' room.pk %}"
+                   class="block hover:bg-gray-50 transition {% if selected_room and selected_room.pk == room.pk %}bg-gray-50 border-l-4 border-blue-500{% else %}border-l-4 border-transparent{% endif %}">
+                    <div class="px-4 py-3 flex items-start">
+                        <!-- 프로필 이미지 -->
+                        <div class="w-10 h-10 bg-gray-300 rounded-full flex-shrink-0 flex items-center justify-center">
+                            <svg class="w-6 h-6 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                            </svg>
+                        </div>
+                        <!-- 대화 정보 -->
+                        <div class="ml-3 flex-1 min-w-0">
+                            <div class="flex justify-between items-center">
+                                <h3 class="font-medium text-gray-800 truncate text-sm">
+                                    {{ room|display_name:request.user }}
+                                </h3>
+                                <span class="text-xs text-gray-400 flex-shrink-0 ml-2">
+                                    {% if room.updated_at.date == today %}
+                                        {{ room.updated_at|korean_time }}
+                                    {% else %}
+                                        {{ room.updated_at|date:"Y.m.d" }}
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% with last_message=room.get_last_message %}
+                                {% if last_message %}
+                                <p class="text-gray-500 text-sm truncate mt-1">
+                                    {{ last_message.get_preview }}
+                                </p>
+                                {% else %}
+                                <p class="text-gray-400 text-sm mt-1">
+                                    아직 메시지가 없습니다
+                                </p>
+                                {% endif %}
+                            {% endwith %}
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            {% else %}
+                <div class="px-4 py-12 text-center text-gray-500">
+                    <p class="mb-4">참여 중인 대화가 없습니다.</p>
+                    <a href="{% url 'chat:new_conversation' %}" class="text-blue-500 hover:underline">
+                        새 대화를 시작해보세요
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+
+    </div>
+
+    <!-- 오른쪽: 대화 내용 -->
+    <div class="flex-1 flex flex-col">
+        {% if selected_room %}
+        <!-- 상대방 정보 헤더 -->
+        <div class="p-4 border-b border-gray-200">
+            <h2 class="text-lg font-medium text-gray-800">{{ display_name }}</h2>
+            {% if selected_room.is_direct and other_user and other_user.job_title %}
+            <p class="text-purple-500 text-sm mt-1">{{ other_user.job_title }}</p>
+            {% endif %}
+        </div>
+
+        <!-- 메시지 목록 -->
+        <div class="flex-1 overflow-y-auto bg-gray-50 p-4">
+            {% if chat_messages %}
+                {% regroup chat_messages by created_at.date as messages_by_date %}
+                {% for date_group in messages_by_date %}
+                    <!-- 날짜 구분선 -->
+                    <div class="flex items-center justify-center my-6">
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                        <span class="px-4 text-xs text-gray-500">{{ date_group.grouper|date:"Y. m. d" }}</span>
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                    </div>
+
+                    {% for message in date_group.list %}
+                        {% if message.sender_id == request.user.pk %}
+                        <!-- 내 메시지 (오른쪽) -->
+                        <div class="flex justify-end mb-4">
+                            <div class="max-w-md">
+                                <div class="bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200">
+                                    <p class="text-gray-800 text-sm whitespace-pre-wrap">{{ message.content }}</p>
+                                </div>
+                                <div class="text-xs text-gray-400 text-right mt-1">
+                                    {{ message.created_at|korean_time }}
+                                </div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <!-- 상대방 메시지 (왼쪽) -->
+                        <div class="flex justify-start mb-4">
+                            <div class="max-w-md">
+                                {% if not selected_room.is_direct %}
+                                <div class="flex items-center mb-1">
+                                    <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                    <span class="ml-2 text-sm font-medium text-gray-700">{{ message.sender.name }}</span>
+                                </div>
+                                {% else %}
+                                <div class="flex items-center mb-1">
+                                    <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                    <span class="ml-2 text-sm font-medium text-gray-700">{{ display_name }}</span>
+                                </div>
+                                {% endif %}
+                                <div class="bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8">
+                                    <p class="text-gray-800 text-sm whitespace-pre-wrap">{{ message.content }}</p>
+                                </div>
+                                <div class="text-xs text-gray-400 ml-8 mt-1">
+                                    {{ message.created_at|korean_time }}
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                {% endfor %}
+            {% else %}
+                <div class="flex items-center justify-center h-full text-gray-500">
+                    아직 메시지가 없습니다. 첫 메시지를 보내보세요!
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- 메시지 입력 -->
+        <div class="p-4 border-t border-gray-200 bg-white">
+            <form action="{% url 'chat:send_message' selected_room.pk %}" method="post">
+                {% csrf_token %}
+                <div class="border border-gray-300 rounded-lg overflow-hidden">
+                    <textarea
+                        name="content"
+                        rows="3"
+                        placeholder="내용 작성해 주세요."
+                        class="w-full px-4 py-3 focus:outline-none resize-none text-sm"
+                        onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); this.form.submit(); }"
+                    ></textarea>
+                    <div class="flex justify-end px-4 py-2 bg-gray-50 border-t border-gray-200">
+                        <button type="submit"
+                                class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded text-sm transition">
+                            보내기
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        {% else %}
+        <!-- 선택된 대화가 없을 때 -->
+        <div class="flex-1 flex items-center justify-center bg-gray-50">
+            <div class="text-center text-gray-500">
+                <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                </svg>
+                <p>대화를 선택해주세요</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

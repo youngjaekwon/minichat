@@ -8,10 +8,13 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic import RedirectView
 
 urlpatterns = [
+    path("", RedirectView.as_view(pattern_name="chat:room_list"), name="home"),
     path("admin/", admin.site.urls),
     path("users/", include("apps.users.urls")),
+    path("chat/", include("apps.chat.urls")),
 ]
 
 # Debug Toolbar (개발 환경에서만)
