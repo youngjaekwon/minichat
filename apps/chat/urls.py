@@ -13,4 +13,9 @@ urlpatterns = [
         apis.MessageListAPIView.as_view(),
         name="api_messages",
     ),
+    path(
+        "api/<int:room_id>/messages/search/",
+        apis.MessageSearchAPIView.as_view(),
+        name="api_messages_search",
+    ),
 ]

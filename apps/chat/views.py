@@ -10,8 +10,7 @@ from django.views.generic import DetailView, ListView, View
 
 import structlog
 
-from apps.chat.constants import MAX_SYNC_MESSAGES
-from apps.chat.models import Message, Room
+from apps.chat.models import Room
 from apps.users.models import User
 
 logger = structlog.get_logger(__name__)
@@ -36,7 +35,6 @@ class RoomListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         context["today"] = date.today()
         context["selected_room"] = None
-        context["chat_messages"] = []
         return context
 
 
@@ -70,15 +68,6 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
         # 채팅방 목록 추가
         context["rooms"] = Room.objects.get_by_user(user).with_latest_message()
         context["today"] = date.today()
-
-        # 메시지 목록 (최신 N개만 로드)
-        chat_messages = Message.objects.get_latest_messages(room, MAX_SYNC_MESSAGES)
-        context["chat_messages"] = chat_messages
-
-        # 무한 스크롤을 위한 추가 컨텍스트
-        total_count = Message.objects.filter(room=room).count()
-        context["has_more_messages"] = total_count > MAX_SYNC_MESSAGES
-        context["oldest_message_id"] = chat_messages[0].pk if chat_messages else None
 
         # 1:1 대화인 경우 상대방 정보 (prefetch된 participants에서 조회)
         if room.is_direct:

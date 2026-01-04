@@ -74,17 +74,20 @@ class TestRoomDetailView:
         assert response.status_code == 302
         assert "login" in response.url
 
-    def test_shows_messages(self, client):
-        """메시지 목록 표시 테스트."""
+    def test_shows_room_detail(self, client):
+        """대화방 상세 페이지 로드 테스트.
+
+        메시지는 API를 통해 로드되므로 페이지 로드 성공만 확인.
+        """
         user = UserFactory()
         room = RoomFactory(created_by=user)
-        message = MessageFactory(room=room, sender=user, content="테스트 메시지")
+        MessageFactory(room=room, sender=user, content="테스트 메시지")
 
         client.force_login(user)
         response = client.get(reverse("chat:room_detail", args=[room.pk]))
 
         assert response.status_code == 200
-        assert message in response.context["chat_messages"]
+        assert response.context["selected_room"] == room
 
     def test_non_participant_denied(self, client):
         """비참여자 접근 차단 테스트."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.contrib.postgres.indexes import GinIndex
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import OuterRef, Prefetch, QuerySet, Subquery
@@ -224,6 +225,13 @@ class MessageQuerySet(QuerySet["Message"]):
         """해당 대화방의 메시지를 반환한다."""
         return self.filter(room=room)
 
+    def search(self, query: str) -> MessageQuerySet:
+        """메시지 내용에서 키워드를 검색한다.
+
+        pg_trgm + GIN 인덱스를 활용한 부분 일치 검색.
+        """
+        return self.filter(content__icontains=query)
+
     def before_cursor(self, cursor_id: int) -> MessageQuerySet:
         """주어진 ID보다 작은(오래된) 메시지를 반환한다."""
         return self.filter(pk__lt=cursor_id)
@@ -418,6 +426,13 @@ class Message(models.Model):
         verbose_name = "메시지"
         verbose_name_plural = "메시지"
         ordering = ["created_at"]
+        indexes = [
+            GinIndex(
+                name="message_content_trigram_idx",
+                fields=["content"],
+                opclasses=["gin_trgm_ops"],
+            ),
+        ]
 
     def __str__(self) -> str:
         sender_name = self.sender.name if self.sender else "알 수 없음"

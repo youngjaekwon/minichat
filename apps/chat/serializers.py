@@ -18,13 +18,17 @@ class MessageListParamsSerializer(serializers.Serializer):
     """메시지 목록 조회 파라미터.
 
     Query Parameters:
-        direction: 조회 방향 (before|after|around)
-        cursor: 기준 메시지 ID
+        direction: 조회 방향 (before|after|around). 기본값: before
+        cursor: 기준 메시지 ID. 없으면 최신 메시지부터 조회
         limit: 조회 개수
     """
 
-    direction = serializers.ChoiceField(choices=MessageDirection.choices)
-    cursor = serializers.IntegerField(min_value=1)
+    direction = serializers.ChoiceField(
+        choices=MessageDirection.choices,
+        required=False,
+        default=MessageDirection.BEFORE,
+    )
+    cursor = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     limit = serializers.IntegerField(
         required=False,
         default=MESSAGES_PER_PAGE,
@@ -46,3 +50,13 @@ class MessageSerializer(serializers.ModelSerializer):
     def get_sender_name(self, obj: Message) -> str:
         """발신자 이름 반환."""
         return obj.sender.name if obj.sender else "알 수 없음"
+
+
+class MessageSearchParamsSerializer(serializers.Serializer):
+    """메시지 검색 파라미터.
+
+    Query Parameters:
+        q: 검색어 (최소 2자)
+    """
+
+    q = serializers.CharField(min_length=2, max_length=100)
