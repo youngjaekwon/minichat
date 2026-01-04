@@ -4,25 +4,27 @@ Django base settings for minichat project.
 공통 설정 파일. 환경별 설정은 local.py, production.py, test.py에서 정의한다.
 """
 
-import os
 from pathlib import Path
 
+import environ
 import structlog
-from dotenv import load_dotenv
-
-# envs/env.local 또는 envs/env.production 등 환경별 파일 로드
-ENV_DIR = Path(__file__).resolve().parent.parent.parent / "envs"
-load_dotenv(ENV_DIR / "env.local")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+# django-environ 설정
+env = environ.Env(
+    DEBUG=(bool, False),
+    DJANGO_SECRET_KEY=(str, "django-insecure-dev-key-change-in-production"),
+    DJANGO_ENV_FILE=(str, "env.local"),
+)
+
+ENV_FILE = BASE_DIR / "envs" / env("DJANGO_ENV_FILE")
+if ENV_FILE.exists():
+    env.read_env(ENV_FILE)
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "django-insecure-dev-key-change-in-production",
-)
+SECRET_KEY = env("DJANGO_SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
@@ -88,16 +90,10 @@ ASGI_APPLICATION = "config.asgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# DATABASE_URL 형식: postgres://USER:PASSWORD@HOST:PORT/NAME
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "minichat"),
-        "USER": os.environ.get("DB_USER", "postgres"),
-        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-        "HOST": os.environ.get("DB_HOST", "localhost"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
-    }
+    "default": env.db("DATABASE_URL", default="sqlite:///db.sqlite3"),
 }
 
 
@@ -151,21 +147,30 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 # Channels Layer
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [(os.environ.get("REDIS_HOST", "localhost"), 6379)],
+# REDIS_URL 형식: redis://HOST:PORT/DB
+REDIS_URL = env("REDIS_URL", default="")
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
         },
-    },
-}
+    }
+else:
+    # Redis가 없으면 InMemoryChannelLayer 사용 (개발용)
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
 
 
 # Celery
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get(
-    "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
-)
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

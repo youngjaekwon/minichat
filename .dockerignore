@@ -1,0 +1,48 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+.ruff_cache
+
+# Local files
+*.sqlite3
+db.sqlite3
+.env
+envs/env.local
+envs/env.production
+
+# Static/Media (collected)
+staticfiles
+media
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# Misc
+*.log
+*.pot
+*.pyc
+.DS_Store
+Thumbs.db

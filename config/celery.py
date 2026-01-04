@@ -1,7 +1,5 @@
 """
-Celery 설정 모듈
-
-이메일 발송 등 비동기 작업을 처리한다.
+Celery config module.
 """
 
 import os
@@ -10,6 +8,7 @@ from celery import Celery
 
 # Django settings 모듈 설정
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.local")
+os.environ.setdefault("DJANGO_ENV_FILE", "env.local")
 
 app = Celery("minichat")
 
