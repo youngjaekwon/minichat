@@ -54,3 +54,24 @@ export function createSeparator(dateStr) {
         displayDate: formatDateDisplay(dateStr),
     };
 }
+
+/**
+ * 채팅방 목록용 시간 포맷팅
+ * 오늘이면 시간(오전/오후), 아니면 날짜(YYYY.MM.DD)를 반환
+ * @param {string} isoString - ISO 8601 형식의 날짜 문자열
+ * @param {boolean} isToday - 오늘 날짜 여부
+ * @returns {string} 포맷팅된 시간 또는 날짜 문자열
+ */
+export function formatRoomTime(isoString, isToday) {
+    if (!isoString) return '';
+
+    if (isToday) {
+        return formatTime(isoString);
+    }
+
+    const date = new Date(isoString);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}.${month}.${day}`;
+}

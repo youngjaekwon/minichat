@@ -154,11 +154,11 @@ class TestMessageModel:
         """메시지 미리보기 테스트."""
         room = RoomFactory()
         short_message = MessageFactory(room=room, content="짧은 메시지")
-        long_content = "가" * 60  # 60자 메시지
+        long_content = "가" * 30  # 30자 메시지
         long_message = MessageFactory(room=room, content=long_content)
 
         assert short_message.get_preview() == "짧은 메시지"
-        assert len(long_message.get_preview()) == 53  # 50자 + "..."
+        assert len(long_message.get_preview()) == 23  # 20자 + "..."
         assert long_message.get_preview().endswith("...")
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from django.contrib.postgres.indexes import GinIndex
@@ -67,6 +68,43 @@ class RoomManager(models.Manager["Room"]):
     def get_by_user(self, user: User) -> RoomQuerySet:
         """해당 사용자가 참여 중인 대화방을 최근 업데이트 순으로 반환한다."""
         return self.get_queryset().for_user(user).ordered_by_updated()
+
+    def get_by_user_paginated(
+        self,
+        user: User,
+        cursor: datetime | None = None,
+        limit: int = 20,
+    ) -> tuple[list[Room], bool, datetime | None]:
+        """사용자의 대화방 목록을 페이지네이션하여 반환한다.
+
+        Args:
+            user: 사용자
+            cursor: 커서 기준 시간 (이 시간보다 이전 데이터 조회)
+            limit: 조회 개수
+
+        Returns:
+            (rooms, has_more, next_cursor) 튜플
+        """
+        queryset = (
+            self.get_by_user(user)
+            .prefetch_related("participants")
+            .with_latest_message()
+        )
+
+        if cursor:
+            queryset = queryset.filter(updated_at__lt=cursor)
+
+        # limit+1 조회하여 has_more 판단
+        rooms = list(queryset[: limit + 1])
+
+        has_more = len(rooms) > limit
+        if has_more:
+            rooms = rooms[:limit]
+
+        # next_cursor 생성
+        next_cursor = rooms[-1].updated_at if has_more and rooms else None
+
+        return rooms, has_more, next_cursor
 
     def get_or_create_direct(self, user1: User, user2: User) -> Room:
         """두 사용자 간 1:1 대화방을 조회하거나 생성한다.
@@ -141,6 +179,87 @@ class RoomManager(models.Manager["Room"]):
             participant_count=len(participants) + 1,
         )
         return room
+
+    def search_by_message(
+        self,
+        user: User,
+        query: str,
+        cursor: datetime | None = None,
+        limit: int = 20,
+    ) -> tuple[list[dict], bool, datetime | None]:
+        """메시지 내용으로 대화방을 검색한다.
+
+        사용자가 참여 중인 대화방의 메시지에서 검색어를 찾고,
+        일치하는 메시지가 있는 대화방 목록을 반환한다.
+
+        Args:
+            user: 검색하는 사용자
+            query: 검색어
+            cursor: 커서 기준 시간 (이 시간보다 이전 데이터 조회)
+            limit: 조회 개수
+
+        Returns:
+            (results, has_more, next_cursor) 튜플
+        """
+        # 사용자가 참여 중인 대화방 ID 목록
+        user_room_ids = user.chat_rooms.values_list("id", flat=True)
+
+        # 각 대화방에서 검색어가 포함된 가장 최신 메시지의 ID를 서브쿼리로 조회
+        latest_msg_id_subquery = (
+            Message.objects.filter(
+                room_id=OuterRef("room_id"),
+                content__icontains=query,
+            )
+            .order_by("-created_at")
+            .values("id")[:1]
+        )
+
+        # DB 레벨에서 룸당 최신 메시지 하나만 조회
+        matching_message_ids = (
+            Message.objects.filter(
+                room_id__in=user_room_ids,
+                content__icontains=query,
+            )
+            .values("room_id")
+            .distinct()
+            .annotate(latest_id=Subquery(latest_msg_id_subquery))
+            .values_list("latest_id", flat=True)
+        )
+
+        matching_messages = (
+            Message.objects.filter(id__in=matching_message_ids)
+            .select_related("room")
+            .prefetch_related("room__participants")
+            .order_by("-created_at")
+        )
+
+        # 커서 기반 필터링
+        if cursor:
+            matching_messages = matching_messages.filter(created_at__lt=cursor)
+
+        # limit+1 조회하여 has_more 판단
+        messages = list(matching_messages[: limit + 1])
+
+        has_more = len(messages) > limit
+        if has_more:
+            messages = messages[:limit]
+
+        results = [
+            {
+                "room": message.room,
+                "display_name": message.room.get_display_name(user),
+                "matched_message_preview": message.get_matched_preview(query),
+                "matched_message_created_at": message.created_at,
+            }
+            for message in messages
+        ]
+
+        # next_cursor 생성
+        next_cursor = (
+            results[-1]["matched_message_created_at"] if has_more and results else None
+        )
+
+        return results, has_more, next_cursor
 
 
 class Room(models.Model):
@@ -471,11 +590,39 @@ class Message(models.Model):
         if not self.content or not self.content.strip():
             raise ValidationError({"content": "메시지 내용은 필수입니다."})
 
-    def get_preview(self, max_length: int = 50) -> str:
+    def get_preview(self, max_length: int = 20) -> str:
         """메시지 미리보기를 반환한다."""
         if len(self.content) <= max_length:
             return self.content
         return self.content[:max_length] + "..."
+
+    def get_matched_preview(self, query: str, max_length: int = 20) -> str:
+        """검색어와 일치하는 부분의 메시지 미리보기를 반환한다."""
+        content = self.content
+        query_lower = query.lower()
+        content_lower = content.lower()
+
+        # 검색어 위치 찾기
+        index = content_lower.find(query_lower)
+        if index == -1:
+            return self.get_preview(max_length)
+
+        # 검색어 중심으로 앞뒤 컨텍스트 포함
+        query_len = len(query)
+        context_len = (max_length - query_len) // 2
+
+        start = max(0, index - context_len)
+        end = min(len(content), index + query_len + context_len)
+
+        preview = content[start:end]
+
+        # 앞뒤 말줄임 처리
+        if start > 0:
+            preview = "..." + preview
+        if end < len(content):
+            preview = preview + "..."
+
+        return preview
 
 
 # Signals

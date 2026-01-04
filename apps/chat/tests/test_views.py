@@ -175,29 +175,6 @@ class TestRoomDetailView:
 
         assert response.context["participant_count"] == 2
 
-    def test_includes_unread_counts(self, client):
-        """채팅방 목록의 안읽은 메시지 수가 컨텍스트에 포함된다."""
-        user = UserFactory()
-        other_user = UserFactory()
-        third_user = UserFactory()
-
-        room1 = RoomFactory(created_by=other_user, participants=[user])
-        room2 = RoomFactory(created_by=third_user, participants=[user])
-
-        # room1: other_user가 보낸 메시지 2개
-        MessageFactory(room=room1, sender=other_user, content="room1 메시지1")
-        MessageFactory(room=room1, sender=other_user, content="room1 메시지2")
-
-        # room2: third_user가 보낸 메시지 1개
-        MessageFactory(room=room2, sender=third_user, content="room2 메시지1")
-
-        client.force_login(user)
-        response = client.get(reverse("chat:room_detail", args=[room1.pk]))
-
-        assert "unread_counts" in response.context
-        assert response.context["unread_counts"].get(room1.pk, 0) == 2
-        assert response.context["unread_counts"].get(room2.pk, 0) == 1
-
 
 @pytest.mark.django_db
 class TestNewConversationView:
