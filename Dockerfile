@@ -24,9 +24,13 @@ RUN uv sync --frozen --no-install-project --group prod
 COPY . .
 RUN uv sync --frozen --group prod
 
+# entrypoint 스크립트 실행 권한 부여
+RUN chmod +x /app/entrypoint.sh
+
 # 정적 파일 수집
 RUN python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python manage.py migrate && echo 'Starting gunicorn on port:' $PORT && gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --access-logfile - --error-logfile - --capture-output --log-level info"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["sh", "-c", "gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers $WEB_CONCURRENCY --access-logfile - --error-logfile - --capture-output --log-level info"]
