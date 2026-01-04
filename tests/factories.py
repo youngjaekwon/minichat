@@ -6,7 +6,7 @@ factory-boy 팩토리 정의
 
 import factory
 
-from apps.chat.models import Message, Room
+from apps.chat.models import Message, MessageRead, Room
 from apps.users.models import User
 
 
@@ -79,3 +79,13 @@ class MessageFactory(factory.django.DjangoModelFactory):
     room = factory.SubFactory(RoomFactory)
     sender = factory.SubFactory(UserFactory)
     content = factory.Faker("text", max_nb_chars=200, locale="ko_KR")
+
+
+class MessageReadFactory(factory.django.DjangoModelFactory):
+    """MessageRead 모델 팩토리"""
+
+    class Meta:
+        model = MessageRead
+
+    message = factory.SubFactory(MessageFactory)
+    user = factory.SubFactory(UserFactory)

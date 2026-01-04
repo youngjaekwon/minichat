@@ -24,3 +24,11 @@ def korean_time(value: datetime | None) -> str:
     else:
         display_hour = hour - 12 if hour > 12 else 12
         return f"오후 {display_hour}:{minute}"
+
+
+@register.filter
+def get_item(dictionary: dict, key) -> int:
+    """딕셔너리에서 키로 값을 가져온다."""
+    if not dictionary:
+        return 0
+    return dictionary.get(key, 0)

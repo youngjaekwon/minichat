@@ -9,7 +9,7 @@ from django.views.generic import DetailView, ListView, View
 
 import structlog
 
-from apps.chat.models import Room
+from apps.chat.models import MessageRead, Room
 from apps.users.models import User
 
 logger = structlog.get_logger(__name__)
@@ -33,6 +33,16 @@ class RoomListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         context["selected_room"] = None
+
+        # 채팅방별 안읽은 메시지 수
+        rooms = context.get("rooms", [])
+        if rooms:
+            context["unread_counts"] = MessageRead.objects.get_unread_counts_for_rooms(
+                rooms, self.request.user
+            )
+        else:
+            context["unread_counts"] = {}
+
         return context
 
 
@@ -70,6 +80,9 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
             context["display_name"] = other_user.name if other_user else "알 수 없음"
         else:
             context["display_name"] = room.name
+
+        # 참여자 수 (프론트엔드에서 unread_count 초기값 계산용)
+        context["participant_count"] = room.participants.count()
 
         return context
 

@@ -11,7 +11,7 @@
 
 {% block content %}
 <div class="h-screen flex bg-white"
-     x-data="chatApp({{ selected_room.pk|default:'null' }}, {{ request.user.pk }}, '{{ request.user.name|escapejs }}')"
+     x-data="chatApp({{ selected_room.pk|default:'null' }}, {{ request.user.pk }}, '{{ request.user.name|escapejs }}', {{ participant_count|default:0 }})"
      @beforeunload.window="disconnect()"
      @keydown.escape.window="isSearchOpen ? closeSearch() : (sidebarOpen && closeSidebar())"
      >
@@ -179,9 +179,15 @@
                                         <span class="text-xs text-gray-400 flex-shrink-0 ml-2"
                                               x-text="formatRoomTime(room.updated_at, room.is_today)"></span>
                                     </div>
-                                    <p class="text-sm truncate mt-1"
-                                       :class="room.last_message_preview ? 'text-gray-500' : 'text-gray-400'"
-                                       x-text="room.last_message_preview || '아직 메시지가 없습니다'"></p>
+                                    <div class="flex justify-between items-center mt-1">
+                                        <p class="text-sm truncate flex-1"
+                                           :class="room.last_message_preview ? 'text-gray-500' : 'text-gray-400'"
+                                           x-text="room.last_message_preview || '아직 메시지가 없습니다'"></p>
+                                        <!-- 안읽은 메시지 배지 -->
+                                        <span x-show="room.unread_count > 0"
+                                              class="ml-2 flex-shrink-0 bg-blue-500 text-white text-xs font-medium px-2 py-0.5 rounded-full min-w-[20px] text-center"
+                                              x-text="room.unread_count > 99 ? '99+' : room.unread_count"></span>
+                                    </div>
                                 </div>
                             </div>
                         </a>
@@ -402,8 +408,12 @@
                             <div :class="item.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
                                 <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="item.content"></p>
                             </div>
-                            <!-- 시간 -->
-                            <div :class="item.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                            <!-- 시간 및 읽음 상태 -->
+                            <div :class="item.sender_id === userId ? 'flex items-center justify-end gap-1 text-xs text-gray-400 mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                                <!-- 안읽은 인원 수 (내 메시지만) -->
+                                <template x-if="item.sender_id === userId && item.unread_count > 0">
+                                    <span class="text-yellow-500 font-medium" x-text="item.unread_count"></span>
+                                </template>
                                 <span x-text="formatTime(item.created_at)"></span>
                             </div>
                         </div>
@@ -444,7 +454,11 @@
                                 <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="item.content"></p>
                             </div>
                             <!-- 시간 및 상태 -->
-                            <div :class="item.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                            <div :class="item.sender_id === userId ? 'flex items-center justify-end gap-1 text-xs text-gray-400 mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                                <!-- 안읽은 인원 수 (내 메시지만) -->
+                                <template x-if="item.sender_id === userId && item.unread_count > 0">
+                                    <span class="text-yellow-500 font-medium" x-text="item.unread_count"></span>
+                                </template>
                                 <span x-text="formatTime(item.created_at)"></span>
                                 <template x-if="item.sender_id === userId && item.status === 'sending'">
                                     <span class="ml-1 text-gray-400">전송 중...</span>
