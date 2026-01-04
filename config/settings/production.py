@@ -3,13 +3,6 @@ Django production settings for minichat project.
 """
 
 import os
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-# 프로덕션 환경 변수 파일 로드
-ENV_DIR = Path(__file__).resolve().parent.parent.parent / "envs"
-load_dotenv(ENV_DIR / "env.production", override=True)
 
 from .base import *  # noqa: F401, F403
 
