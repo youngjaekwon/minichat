@@ -298,6 +298,9 @@ class Room(models.Model):
         verbose_name = "대화방"
         verbose_name_plural = "대화방"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["updated_at"], name="room_updated_at_idx"),
+        ]
 
     def __str__(self) -> str:
         if self.is_direct:
@@ -578,6 +581,10 @@ class Message(models.Model):
                 name="message_content_trigram_idx",
                 fields=["content"],
                 opclasses=["gin_trgm_ops"],
+            ),
+            models.Index(fields=["created_at"], name="message_created_at_idx"),
+            models.Index(
+                fields=["room", "-created_at"], name="message_room_created_desc_idx"
             ),
         ]
 
