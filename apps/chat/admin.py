@@ -13,6 +13,7 @@ class RoomAdmin(admin.ModelAdmin):
         "created_by",
         "created_at",
     )
+    list_select_related = ("created_by",)
     list_filter = ("is_direct", "created_at")
     search_fields = ("name",)
     filter_horizontal = ("participants",)
@@ -28,6 +29,7 @@ class MessageAdmin(admin.ModelAdmin):
         "content_preview",
         "created_at",
     )
+    list_select_related = ("room", "sender")
     list_filter = ("created_at",)
     search_fields = ("content",)
     raw_id_fields = ("room", "sender")

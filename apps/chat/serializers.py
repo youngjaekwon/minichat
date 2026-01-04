@@ -46,7 +46,14 @@ class MessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Message
-        fields = ["id", "content", "sender_id", "sender_name", "created_at", "unread_count"]
+        fields = [
+            "id",
+            "content",
+            "sender_id",
+            "sender_name",
+            "created_at",
+            "unread_count",
+        ]
         read_only_fields = fields
 
     def get_sender_name(self, obj: Message) -> str:
@@ -110,7 +117,17 @@ class RoomSerializer(serializers.ModelSerializer):
         return obj.updated_at.date() == localdate()
 
     def get_unread_count(self, obj: Room) -> int:
-        """안읽은 메시지 수."""
+        """안읽은 메시지 수.
+
+        context에 'unread_counts' dict가 있으면 해당 값을 사용하고,
+        없으면 개별 조회한다.
+        """
+        # context에서 미리 계산된 값 사용
+        unread_counts = self.context.get("unread_counts")
+        if unread_counts is not None:
+            return unread_counts.get(obj.pk, 0)
+
+        # fallback: 개별 조회
         user = self.context.get("user")
         if not user:
             return 0
