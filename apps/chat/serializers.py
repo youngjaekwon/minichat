@@ -3,7 +3,7 @@ from django.utils.timezone import localdate
 
 from rest_framework import serializers
 
-from apps.chat.constants import MESSAGES_PER_PAGE
+from apps.chat.constants import MESSAGES_PER_PAGE, ROOMS_PER_PAGE
 from apps.chat.models import Message, Room
 
 
@@ -91,3 +91,47 @@ class RoomSerializer(serializers.ModelSerializer):
     def get_is_today(self, obj: Room) -> bool:
         """오늘 업데이트 여부."""
         return obj.updated_at.date() == localdate()
+
+
+class RoomListParamsSerializer(serializers.Serializer):
+    """대화방 목록 조회 파라미터.
+
+    Query Parameters:
+        cursor: 커서 기준 시간 (ISO 8601)
+        limit: 조회 개수
+    """
+
+    cursor = serializers.DateTimeField(required=False, allow_null=True)
+    limit = serializers.IntegerField(
+        required=False,
+        default=ROOMS_PER_PAGE,
+        min_value=1,
+        max_value=50,
+    )
+
+
+class RoomSearchParamsSerializer(serializers.Serializer):
+    """대화방 검색 파라미터.
+
+    Query Parameters:
+        q: 검색어 (최소 2자)
+        cursor: 커서 기준 시간 (ISO 8601)
+        limit: 조회 개수
+    """
+
+    q = serializers.CharField(min_length=2, max_length=100)
+    cursor = serializers.DateTimeField(required=False, allow_null=True)
+    limit = serializers.IntegerField(
+        required=False,
+        default=ROOMS_PER_PAGE,
+        min_value=1,
+        max_value=50,
+    )
+
+
+class RoomSearchResultSerializer(serializers.Serializer):
+    """대화방 검색 결과 직렬화."""
+
+    id = serializers.IntegerField(source="room.id")
+    display_name = serializers.CharField()
+    matched_message_preview = serializers.CharField()

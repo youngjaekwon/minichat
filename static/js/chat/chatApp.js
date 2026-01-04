@@ -26,6 +26,21 @@ export default function chatApp(roomId, userId, userName) {
         // 채팅방 목록 상태
         rooms: [],
         isLoadingRooms: true,
+        hasMoreRooms: false,
+        nextRoomCursor: null,
+        isLoadingMoreRooms: false,
+
+        // 사이드바 검색 상태
+        sidebarSearchQuery: '',
+        sidebarSearchResults: [],
+        isSidebarSearchMode: false,
+        isSearchingSidebar: false,
+        sidebarSearchPerformed: false,
+        sidebarSearchError: '',
+        lastSidebarSearchQuery: '', // 검색 실행 시점의 검색어 (하이라이팅용)
+        hasMoreSearchResults: false,
+        nextSearchCursor: null,
+        isLoadingMoreSearchResults: false,
 
         // 사이드바 상태 (모바일용)
         sidebarOpen: false,
@@ -71,6 +86,7 @@ export default function chatApp(roomId, userId, userName) {
         searchCurrentIndex: 0,
         isSearching: false,
         searchPerformed: false,
+        searchError: '',
 
         // 매니저 인스턴스
         wsManager: null,
@@ -136,25 +152,180 @@ export default function chatApp(roomId, userId, userName) {
 
         /**
          * 채팅방 목록 로드
+         * @param {boolean} loadMore - 추가 로드 여부
          */
-        async loadRooms() {
-            this.isLoadingRooms = true;
+        async loadRooms(loadMore = false) {
+            if (!loadMore) {
+                this.isLoadingRooms = true;
+            } else {
+                this.isLoadingMoreRooms = true;
+            }
 
             try {
-                const response = await fetch('/chat/api/rooms/');
+                let url = '/chat/api/rooms/';
+                if (loadMore && this.nextRoomCursor) {
+                    url = `/chat/api/rooms/?cursor=${encodeURIComponent(this.nextRoomCursor)}`;
+                }
+
+                const response = await fetch(url);
 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
 
                 const data = await response.json();
-                this.rooms = data.rooms || [];
+
+                if (loadMore) {
+                    // 추가 로드: 기존 목록에 추가
+                    this.rooms = [...this.rooms, ...(data.rooms || [])];
+                } else {
+                    // 초기 로드: 새로 설정
+                    this.rooms = data.rooms || [];
+                }
+
+                this.hasMoreRooms = data.has_more || false;
+                this.nextRoomCursor = data.next_cursor || null;
             } catch (error) {
                 console.error('Failed to load rooms:', error);
                 this.showError('대화 목록을 불러오는데 실패했습니다.');
             } finally {
                 this.isLoadingRooms = false;
+                this.isLoadingMoreRooms = false;
             }
+        },
+
+        /**
+         * 더 많은 채팅방 로드
+         */
+        async loadMoreRooms() {
+            if (!this.hasMoreRooms || this.isLoadingMoreRooms) {
+                return;
+            }
+            await this.loadRooms(true);
+        },
+
+        // ==================== 사이드바 검색 ====================
+
+        /**
+         * 사이드바 검색 수행
+         * @param {boolean} loadMore - 추가 로드 여부
+         */
+        async searchRooms(loadMore = false) {
+            // 검색어가 비어있거나 2자 미만이면 에러 표시
+            if (!this.sidebarSearchQuery || this.sidebarSearchQuery.length < 2) {
+                this.sidebarSearchError = '최소 2자 이상 입력해주세요';
+                return;
+            }
+
+            this.sidebarSearchError = '';
+            this.isSidebarSearchMode = true;
+
+            if (!loadMore) {
+                this.isSearchingSidebar = true;
+                this.sidebarSearchPerformed = false;
+            } else {
+                this.isLoadingMoreSearchResults = true;
+            }
+
+            try {
+                let url = `/chat/api/rooms/search/?q=${encodeURIComponent(this.sidebarSearchQuery)}`;
+                if (loadMore && this.nextSearchCursor) {
+                    url += `&cursor=${encodeURIComponent(this.nextSearchCursor)}`;
+                }
+
+                const response = await fetch(url);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (loadMore) {
+                    // 추가 로드: 기존 결과에 추가
+                    this.sidebarSearchResults = [
+                        ...this.sidebarSearchResults,
+                        ...(data.rooms || []),
+                    ];
+                } else {
+                    // 초기 검색: 새로 설정
+                    this.sidebarSearchResults = data.rooms || [];
+                    this.sidebarSearchPerformed = true;
+                    this.lastSidebarSearchQuery = this.sidebarSearchQuery;
+                }
+
+                this.hasMoreSearchResults = data.has_more || false;
+                this.nextSearchCursor = data.next_cursor || null;
+            } catch (error) {
+                console.error('Failed to search rooms:', error);
+                this.showError('검색에 실패했습니다.');
+            } finally {
+                this.isSearchingSidebar = false;
+                this.isLoadingMoreSearchResults = false;
+            }
+        },
+
+        /**
+         * 더 많은 검색 결과 로드
+         */
+        async searchMoreRooms() {
+            if (!this.hasMoreSearchResults || this.isLoadingMoreSearchResults) {
+                return;
+            }
+            await this.searchRooms(true);
+        },
+
+        /**
+         * 사이드바 검색 초기화
+         */
+        clearSidebarSearch() {
+            this.sidebarSearchQuery = '';
+            this.sidebarSearchResults = [];
+            this.isSidebarSearchMode = false;
+            this.isSearchingSidebar = false;
+            this.sidebarSearchPerformed = false;
+            this.sidebarSearchError = '';
+            this.lastSidebarSearchQuery = '';
+            this.hasMoreSearchResults = false;
+            this.nextSearchCursor = null;
+            this.isLoadingMoreSearchResults = false;
+        },
+
+        /**
+         * 텍스트에서 검색어를 하이라이트하여 HTML 반환
+         * @param {string} text - 원본 텍스트
+         * @param {string} query - 검색어
+         * @returns {string} 하이라이트된 HTML 문자열
+         */
+        highlightText(text, query) {
+            if (!query || !text) {
+                return text || '';
+            }
+
+            // 대소문자 무시하여 검색어 위치 찾기
+            const lowerText = text.toLowerCase();
+            const lowerQuery = query.toLowerCase();
+            const index = lowerText.indexOf(lowerQuery);
+
+            if (index === -1) {
+                return text;
+            }
+
+            // HTML 이스케이프 함수
+            const escapeHtml = (str) => {
+                return str
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            };
+
+            const before = escapeHtml(text.substring(0, index));
+            const match = escapeHtml(text.substring(index, index + query.length));
+            const after = escapeHtml(text.substring(index + query.length));
+
+            return `${before}<mark class="bg-yellow-200 text-gray-900 px-0.5 rounded">${match}</mark>${after}`;
         },
 
         // ==================== 연결 ====================
@@ -201,9 +372,10 @@ export default function chatApp(roomId, userId, userName) {
 
         /**
          * 검색 수행
+         * @param {boolean} showError - 에러 메시지 표시 여부
          */
-        performSearch() {
-            this.searchManager?.performSearch();
+        performSearch(showError = false) {
+            this.searchManager?.performSearch(showError);
         },
 
         /**

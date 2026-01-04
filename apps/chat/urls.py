@@ -14,6 +14,11 @@ urlpatterns = [
         name="api_rooms",
     ),
     path(
+        "api/rooms/search/",
+        apis.RoomSearchAPIView.as_view(),
+        name="api_rooms_search",
+    ),
+    path(
         "api/<int:room_id>/messages/",
         apis.MessageListAPIView.as_view(),
         name="api_messages",

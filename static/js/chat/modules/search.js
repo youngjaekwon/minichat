@@ -31,6 +31,7 @@ export function createSearchManager(app) {
         closeSearch() {
             app.isSearchOpen = false;
             app.searchQuery = '';
+            app.searchError = '';
             this.clearSearchResults();
             this.clearHighlight();
         },
@@ -46,13 +47,18 @@ export function createSearchManager(app) {
 
         /**
          * 검색 수행
+         * @param {boolean} showError - 에러 메시지 표시 여부 (Enter 키로 호출 시 true)
          */
-        async performSearch() {
+        async performSearch(showError = false) {
             if (app.searchQuery.length < 2) {
+                if (showError) {
+                    app.searchError = '최소 2자 이상 입력해주세요';
+                }
                 this.clearSearchResults();
                 return;
             }
 
+            app.searchError = '';
             app.isSearching = true;
             app.searchPerformed = false;
 

@@ -12,6 +12,9 @@ from apps.chat.serializers import (
     MessageListParamsSerializer,
     MessageSearchParamsSerializer,
     MessageSerializer,
+    RoomListParamsSerializer,
+    RoomSearchParamsSerializer,
+    RoomSearchResultSerializer,
     RoomSerializer,
 )
 
@@ -248,16 +251,37 @@ class RoomListAPIView(APIView):
     사용자가 참여 중인 채팅방 목록을 반환한다.
 
     GET /chat/api/rooms/
+    GET /chat/api/rooms/?cursor={datetime}&limit={limit}
+
+    Query Parameters:
+        cursor: 커서 기준 시간 (ISO 8601)
+        limit: 조회 개수
+
+    Returns:
+        rooms: 채팅방 목록
+            - id: 대화방 ID
+            - display_name: 표시 이름
+            - last_message_preview: 마지막 메시지 미리보기
+            - updated_at: 마지막 업데이트 시간
+            - is_today: 오늘 업데이트 여부
+        has_more: 추가 데이터 존재 여부
+        next_cursor: 다음 페이지 커서 시간
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request: Request) -> Response:
         """채팅방 목록을 조회한다."""
-        rooms = (
-            Room.objects.get_by_user(request.user)
-            .prefetch_related("participants")
-            .with_latest_message()
+        params = RoomListParamsSerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+
+        cursor = params.validated_data.get("cursor")
+        limit = params.validated_data["limit"]
+
+        rooms, has_more, next_cursor = Room.objects.get_by_user_paginated(
+            request.user,
+            cursor=cursor,
+            limit=limit,
         )
 
         serializer = RoomSerializer(
@@ -265,12 +289,74 @@ class RoomListAPIView(APIView):
             many=True,
             context={"user": request.user},
         )
-        data = serializer.data
 
         logger.info(
             "rooms_loaded",
             user_id=request.user.pk,
-            count=len(data),
+            count=len(rooms),
+            has_more=has_more,
         )
 
-        return Response({"rooms": data})
+        return Response({
+            "rooms": serializer.data,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+        })
+
+
+class RoomSearchAPIView(APIView):
+    """대화방 검색 API.
+
+    사용자가 참여 중인 대화방의 메시지에서 검색어를 찾고,
+    일치하는 메시지가 있는 대화방 목록을 반환한다.
+
+    GET /chat/api/rooms/search/?q=검색어
+    GET /chat/api/rooms/search/?q=검색어&cursor={datetime}&limit={limit}
+
+    Query Parameters:
+        q: 검색어 (필수, 최소 2자)
+        cursor: 커서 기준 시간 (ISO 8601)
+        limit: 조회 개수
+
+    Returns:
+        rooms: 일치하는 메시지가 있는 대화방 목록
+            - id: 대화방 ID
+            - display_name: 표시 이름
+            - matched_message_preview: 일치하는 메시지 미리보기
+        has_more: 추가 데이터 존재 여부
+        next_cursor: 다음 페이지 커서 시간
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        """대화방을 검색한다."""
+        params = RoomSearchParamsSerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+
+        query = params.validated_data["q"]
+        cursor = params.validated_data.get("cursor")
+        limit = params.validated_data["limit"]
+
+        results, has_more, next_cursor = Room.objects.search_by_message(
+            request.user,
+            query,
+            cursor=cursor,
+            limit=limit,
+        )
+
+        serializer = RoomSearchResultSerializer(results, many=True)
+
+        logger.info(
+            "rooms_searched",
+            user_id=request.user.pk,
+            query=query,
+            result_count=len(results),
+            has_more=has_more,
+        )
+
+        return Response({
+            "rooms": serializer.data,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+        })
