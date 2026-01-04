@@ -457,7 +457,7 @@ function chatApp(roomId, userId, userName, hasMoreMessages, oldestMessageId) {
 
             try {
                 const response = await fetch(
-                    `/chat/api/${this.roomId}/messages/?before=${this.oldestMessageId}`
+                    `/chat/api/${this.roomId}/messages/?direction=before&cursor=${this.oldestMessageId}`
                 );
 
                 if (!response.ok) {

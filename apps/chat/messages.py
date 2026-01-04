@@ -52,3 +52,25 @@ class ErrorMessage(BaseModel):
     type: MessageType = MessageType.ERROR
     code: str
     message: str
+
+
+# HTTP API 응답 타입
+
+
+class MessageListResponse(BaseModel):
+    """before/after API 응답."""
+
+    messages: list[MessagePayload]
+    has_more: bool
+    next_cursor: int | None
+
+
+class MessageAroundResponse(BaseModel):
+    """around API 응답."""
+
+    messages: list[MessagePayload]
+    has_more_before: bool
+    has_more_after: bool
+    next_cursor_before: int | None
+    next_cursor_after: int | None
+    target_message_id: int

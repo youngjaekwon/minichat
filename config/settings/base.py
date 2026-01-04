@@ -47,6 +47,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "channels",
     "django_structlog",
+    "rest_framework",
 ]
 
 LOCAL_APPS: list[str] = [
@@ -196,6 +197,20 @@ AUTHENTICATION_BACKENDS = [
 LOGIN_URL = "users:login"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "users:login"
+
+
+# Django REST Framework
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+}
 
 
 # Logging with structlog
