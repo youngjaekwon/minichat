@@ -217,12 +217,155 @@ class Room(models.Model):
         return self.participants.filter(pk=user.pk).exists()
 
 
+class MessageQuerySet(QuerySet["Message"]):
+    """Message 모델의 QuerySet."""
+
+    def for_room(self, room: Room) -> MessageQuerySet:
+        """해당 대화방의 메시지를 반환한다."""
+        return self.filter(room=room)
+
+    def before_cursor(self, cursor_id: int) -> MessageQuerySet:
+        """주어진 ID보다 작은(오래된) 메시지를 반환한다."""
+        return self.filter(pk__lt=cursor_id)
+
+    def after_cursor(self, cursor_id: int) -> MessageQuerySet:
+        """주어진 ID보다 큰(최신) 메시지를 반환한다."""
+        return self.filter(pk__gt=cursor_id)
+
+    def ordered_by_created_desc(self) -> MessageQuerySet:
+        """생성 시간 내림차순 정렬 (최신순)."""
+        return self.order_by("-created_at", "-pk")
+
+    def ordered_by_created_asc(self) -> MessageQuerySet:
+        """생성 시간 오름차순 정렬."""
+        return self.order_by("created_at", "pk")
+
+    def with_sender(self) -> MessageQuerySet:
+        """sender를 select_related로 조회."""
+        return self.select_related("sender")
+
+
 class MessageManager(models.Manager["Message"]):
     """Message 모델의 커스텀 매니저."""
 
-    def get_by_room(self, room: Room) -> QuerySet[Message]:
+    def get_queryset(self) -> MessageQuerySet:
+        return MessageQuerySet(self.model, using=self._db)
+
+    def get_by_room(self, room: Room) -> MessageQuerySet:
         """해당 대화방의 메시지를 생성 시간 오름차순으로 반환한다."""
-        return self.filter(room=room).select_related("sender").order_by("created_at")
+        return self.get_queryset().for_room(room).with_sender().ordered_by_created_asc()
+
+    def get_latest_messages(self, room: Room, limit: int) -> list[Message]:
+        """해당 대화방의 최신 메시지를 limit 개수만큼 반환한다.
+
+        Returns:
+            최신순으로 조회 후 시간순으로 정렬된 리스트
+        """
+        messages = list(
+            self.get_queryset()
+            .for_room(room)
+            .with_sender()
+            .ordered_by_created_desc()[:limit]
+        )
+        return list(reversed(messages))
+
+    def get_messages_before(
+        self, room: Room, cursor_id: int, limit: int
+    ) -> tuple[list[Message], bool]:
+        """cursor_id 이전의 메시지를 조회한다.
+
+        Args:
+            room: 대화방
+            cursor_id: 기준 메시지 ID
+            limit: 조회 개수
+
+        Returns:
+            (메시지 리스트, has_more 여부) 튜플
+        """
+        messages = list(
+            self.get_queryset()
+            .for_room(room)
+            .before_cursor(cursor_id)
+            .with_sender()
+            .ordered_by_created_desc()[: limit + 1]
+        )
+
+        has_more = len(messages) > limit
+        if has_more:
+            messages = messages[:limit]
+
+        return list(reversed(messages)), has_more
+
+    def get_messages_after(
+        self, room: Room, cursor_id: int, limit: int
+    ) -> tuple[list[Message], bool]:
+        """cursor_id 이후의 메시지를 조회한다.
+
+        Args:
+            room: 대화방
+            cursor_id: 기준 메시지 ID
+            limit: 조회 개수
+
+        Returns:
+            (메시지 리스트, has_more 여부) 튜플
+            - 메시지는 시간순 정렬 (오래된 것 먼저)
+        """
+        messages = list(
+            self.get_queryset()
+            .for_room(room)
+            .after_cursor(cursor_id)
+            .with_sender()
+            .ordered_by_created_asc()[: limit + 1]
+        )
+
+        has_more = len(messages) > limit
+        if has_more:
+            messages = messages[:limit]
+
+        return messages, has_more
+
+    def get_messages_around(
+        self, room: Room, cursor_id: int, limit: int
+    ) -> tuple[list[Message], bool, bool]:
+        """cursor_id 전후의 메시지를 조회한다.
+
+        Args:
+            room: 대화방
+            cursor_id: 기준 메시지 ID (이 메시지 포함)
+            limit: 조회 개수 (기준 메시지 포함)
+
+        Returns:
+            (메시지 리스트, has_more_before, has_more_after) 튜플
+            - 메시지는 시간순 정렬 (오래된 것 먼저)
+        """
+        half = limit // 2
+
+        # 기준 메시지 포함 이전 메시지 (내림차순 조회 후 reverse)
+        before_messages = list(
+            self.get_queryset()
+            .for_room(room)
+            .filter(pk__lte=cursor_id)
+            .with_sender()
+            .ordered_by_created_desc()[: half + 2]
+        )
+        has_more_before = len(before_messages) > half + 1
+        if has_more_before:
+            before_messages = before_messages[: half + 1]
+        before_messages = list(reversed(before_messages))
+
+        # 기준 메시지 이후 메시지 (기준 메시지 제외)
+        after_messages = list(
+            self.get_queryset()
+            .for_room(room)
+            .after_cursor(cursor_id)
+            .with_sender()
+            .ordered_by_created_asc()[: half + 1]
+        )
+        has_more_after = len(after_messages) > half
+        if has_more_after:
+            after_messages = after_messages[:half]
+
+        return before_messages + after_messages, has_more_before, has_more_after
 
     def create_message(self, room: Room, sender: User, content: str) -> Message:
         """새 메시지를 생성하고 대화방의 updated_at을 갱신한다.

@@ -8,4 +8,9 @@ urlpatterns = [
     path("", views.RoomListView.as_view(), name="room_list"),
     path("new/", views.NewConversationView.as_view(), name="new_conversation"),
     path("<int:pk>/", views.RoomDetailView.as_view(), name="room_detail"),
+    path(
+        "api/<int:room_id>/messages/",
+        views.MessageListAPIView.as_view(),
+        name="api_messages",
+    ),
 ]

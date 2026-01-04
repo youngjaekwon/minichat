@@ -7,7 +7,7 @@
 
 {% block content %}
 <div class="h-screen flex bg-white"
-     x-data="chatApp({{ selected_room.pk|default:'null' }}, {{ request.user.pk }}, '{{ request.user.name|escapejs }}')"
+     x-data="chatApp({{ selected_room.pk|default:'null' }}, {{ request.user.pk }}, '{{ request.user.name|escapejs }}', {{ has_more_messages|yesno:'true,false'|default:'false' }}, {{ oldest_message_id|default:'null' }})"
      @beforeunload.window="disconnect()"
      >
     <!-- 왼쪽 사이드바: 채팅방 목록 -->
@@ -117,6 +117,64 @@
                 </template>
             </div>
 
+            <!-- 더 이상 메시지 없음 표시 -->
+            <div x-show="!hasMore && oldMessages.length > 0" class="flex justify-center py-4">
+                <span class="text-sm text-gray-400">대화의 시작입니다</span>
+            </div>
+
+            <!-- 로딩 센티널 (무한 스크롤 트리거) -->
+            <div x-show="hasMore && !isLoadingMore"
+                 x-ref="loadMoreSentinel"
+                 class="flex justify-center py-4">
+                <span class="text-sm text-gray-400">위로 스크롤하여 이전 메시지 불러오기</span>
+            </div>
+
+            <!-- 로딩 중 표시 -->
+            <div x-show="isLoadingMore" class="flex justify-center py-4">
+                <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">이전 메시지 불러오는 중...</span>
+            </div>
+
+            <!-- 이전 메시지 영역 (무한 스크롤로 로드된 메시지) -->
+            <template x-for="item in oldMessages" :key="item.id || item.date">
+                <div>
+                    <!-- 날짜 구분선 -->
+                    <div x-show="item.type === 'separator'"
+                         class="flex items-center justify-center my-6 date-separator"
+                         :data-date="item.date">
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                        <span class="px-4 text-xs text-gray-500" x-text="item.displayDate"></span>
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                    </div>
+                    <!-- 메시지 -->
+                    <div x-show="item.type !== 'separator'"
+                         class="message-item"
+                         :class="item.sender_id === userId ? 'flex justify-end mb-4' : 'flex justify-start mb-4'"
+                         :data-message-id="item.id">
+                        <div class="max-w-md">
+                            <!-- 상대방 메시지 헤더 -->
+                            <template x-if="item.sender_id !== userId">
+                                <div class="flex items-center mb-1">
+                                    <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                    <span class="ml-2 text-sm font-medium text-gray-700" x-text="item.sender_name"></span>
+                                </div>
+                            </template>
+                            <!-- 메시지 내용 -->
+                            <div :class="item.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
+                                <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="item.content"></p>
+                            </div>
+                            <!-- 시간 -->
+                            <div :class="item.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                                <span x-text="formatTime(item.created_at)"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
             <!-- 초기 메시지 (SSR) -->
             {% if chat_messages %}
                 {% regroup chat_messages by created_at.date as messages_by_date %}
@@ -211,6 +269,59 @@
                     </div>
                 </div>
             </template>
+
+            <!-- 스크롤 다운으로 로드된 새 메시지 (슬라이딩 윈도우로 제거된 메시지 복원) -->
+            <template x-for="item in newerMessages" :key="item.id || item.date">
+                <div>
+                    <!-- 날짜 구분선 -->
+                    <div x-show="item.type === 'separator'"
+                         class="flex items-center justify-center my-6 date-separator"
+                         :data-date="item.date">
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                        <span class="px-4 text-xs text-gray-500" x-text="item.displayDate"></span>
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                    </div>
+                    <!-- 메시지 -->
+                    <div x-show="item.type !== 'separator'"
+                         class="message-item"
+                         :class="item.sender_id === userId ? 'flex justify-end mb-4' : 'flex justify-start mb-4'"
+                         :data-message-id="item.id">
+                        <div class="max-w-md">
+                            <!-- 상대방 메시지 헤더 -->
+                            <template x-if="item.sender_id !== userId">
+                                <div class="flex items-center mb-1">
+                                    <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                    <span class="ml-2 text-sm font-medium text-gray-700" x-text="item.sender_name"></span>
+                                </div>
+                            </template>
+                            <!-- 메시지 내용 -->
+                            <div :class="item.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
+                                <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="item.content"></p>
+                            </div>
+                            <!-- 시간 -->
+                            <div :class="item.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                                <span x-text="formatTime(item.created_at)"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- 하단 로딩 센티널 (스크롤 다운 무한 스크롤 트리거) -->
+            <div x-show="hasMoreNewer && !isLoadingNewer"
+                 x-ref="loadNewerSentinel"
+                 class="flex justify-center py-4">
+                <span class="text-sm text-gray-400">아래로 스크롤하여 새 메시지 불러오기</span>
+            </div>
+
+            <!-- 하단 로딩 중 표시 -->
+            <div x-show="isLoadingNewer" class="flex justify-center py-4">
+                <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">새 메시지 불러오는 중...</span>
+            </div>
         </div>
 
         <!-- 에러 메시지 표시 -->
@@ -259,7 +370,7 @@
 </div>
 
 <script>
-function chatApp(roomId, userId, userName) {
+function chatApp(roomId, userId, userName, hasMoreMessages, oldestMessageId) {
     return {
         // 설정
         roomId: roomId,
@@ -282,6 +393,25 @@ function chatApp(roomId, userId, userName) {
         lastDate: null,  // 현재까지의 마지막 날짜 (YYYY-MM-DD)
         pendingMessages: {},
 
+        // 무한 스크롤 상태 (스크롤 업)
+        oldMessages: [],        // 무한 스크롤로 로드된 이전 메시지
+        isLoadingMore: false,
+        hasMore: hasMoreMessages || false,
+        oldestMessageId: oldestMessageId || null,
+        observer: null,
+        firstDate: null,  // SSR 메시지의 첫 번째 날짜
+
+        // 무한 스크롤 상태 (스크롤 다운 - 슬라이딩 윈도우로 제거된 메시지 복원)
+        newerMessages: [],      // 스크롤 다운으로 로드된 새 메시지
+        isLoadingNewer: false,
+        hasMoreNewer: false,
+        newestMessageId: null,
+        bottomObserver: null,
+
+        // 슬라이딩 윈도우 설정
+        slidingWindowSize: 150,
+        slidingWindowBuffer: 50,
+
         // 에러 표시
         errorMessage: null,
         errorTimeout: null,
@@ -299,15 +429,427 @@ function chatApp(roomId, userId, userName) {
             const separators = document.querySelectorAll('.date-separator');
             if (separators.length > 0) {
                 this.lastDate = separators[separators.length - 1].dataset.date;
+                // 첫 번째 날짜도 추출 (이전 메시지 로드 시 사용)
+                this.firstDate = separators[0].dataset.date;
             }
 
             this.connect();
+            this.setupInfiniteScroll();
 
             // 페이지 언로드 시 연결 종료
             window.addEventListener('beforeunload', () => this.disconnect());
 
             // 페이지 로드 시 스크롤을 맨 아래로 이동
             this.scrollToBottom();
+        },
+
+        // 무한 스크롤 설정 (양방향)
+        setupInfiniteScroll() {
+            this.setupTopSentinel();
+            this.setupBottomSentinel();
+        },
+
+        // 상단 센티널 설정 (스크롤 업)
+        setupTopSentinel() {
+            if (!this.hasMore) return;
+
+            this.$nextTick(() => {
+                const sentinel = this.$refs.loadMoreSentinel;
+                if (!sentinel) return;
+
+                this.observer = new IntersectionObserver(
+                    (entries) => {
+                        entries.forEach((entry) => {
+                            if (entry.isIntersecting && !this.isLoadingMore && this.hasMore) {
+                                this.loadMoreMessages();
+                            }
+                        });
+                    },
+                    {
+                        root: this.$refs.messagesContainer,
+                        rootMargin: '100px 0px 0px 0px',  // 100px 전에 미리 로드
+                        threshold: 0.1,
+                    }
+                );
+
+                this.observer.observe(sentinel);
+            });
+        },
+
+        // 하단 센티널 설정 (스크롤 다운)
+        setupBottomSentinel() {
+            if (!this.hasMoreNewer) return;
+
+            this.$nextTick(() => {
+                const sentinel = this.$refs.loadNewerSentinel;
+                if (!sentinel) return;
+
+                this.bottomObserver = new IntersectionObserver(
+                    (entries) => {
+                        entries.forEach((entry) => {
+                            if (entry.isIntersecting && !this.isLoadingNewer && this.hasMoreNewer) {
+                                this.loadNewerMessages();
+                            }
+                        });
+                    },
+                    {
+                        root: this.$refs.messagesContainer,
+                        rootMargin: '0px 0px 100px 0px',  // 하단 100px 전에 미리 로드
+                        threshold: 0.1,
+                    }
+                );
+
+                this.bottomObserver.observe(sentinel);
+            });
+        },
+
+        // 이전 메시지 로드
+        async loadMoreMessages() {
+            if (this.isLoadingMore || !this.hasMore || !this.oldestMessageId) return;
+
+            this.isLoadingMore = true;
+            const container = this.$refs.messagesContainer;
+            const scrollHeightBefore = container.scrollHeight;
+            const scrollTopBefore = container.scrollTop;
+
+            try {
+                const response = await fetch(
+                    `/chat/api/${this.roomId}/messages/?before=${this.oldestMessageId}`
+                );
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.messages && data.messages.length > 0) {
+                    // 날짜 구분선 처리 포함하여 메시지 삽입
+                    const processedMessages = this.processOldMessages(data.messages);
+                    this.oldMessages = [...processedMessages, ...this.oldMessages];
+
+                    // 가장 오래된 메시지 ID 업데이트
+                    this.oldestMessageId = data.next_cursor;
+                    this.hasMore = data.has_more;
+
+                    // 스크롤 위치 유지
+                    this.$nextTick(() => {
+                        const scrollHeightAfter = container.scrollHeight;
+                        container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
+                    });
+
+                    // 슬라이딩 윈도우 적용
+                    this.applySlidingWindow('bottom');
+                }
+            } catch (error) {
+                console.error('Failed to load more messages:', error);
+                this.showError('이전 메시지를 불러오는데 실패했습니다.');
+            } finally {
+                this.isLoadingMore = false;
+            }
+        },
+
+        // 새 메시지 로드 (스크롤 다운)
+        async loadNewerMessages() {
+            if (this.isLoadingNewer || !this.hasMoreNewer || !this.newestMessageId) return;
+
+            this.isLoadingNewer = true;
+
+            try {
+                const response = await fetch(
+                    `/chat/api/${this.roomId}/messages/?after=${this.newestMessageId}`
+                );
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.messages && data.messages.length > 0) {
+                    // 날짜 구분선 처리 포함하여 메시지 삽입
+                    const processedMessages = this.processNewerMessages(data.messages);
+                    this.newerMessages = [...this.newerMessages, ...processedMessages];
+
+                    // 가장 최신 메시지 ID 업데이트
+                    this.newestMessageId = data.next_cursor;
+                    this.hasMoreNewer = data.has_more;
+
+                    // 슬라이딩 윈도우 적용 (위쪽에서 제거)
+                    this.applySlidingWindow('top');
+                }
+            } catch (error) {
+                console.error('Failed to load newer messages:', error);
+                this.showError('새 메시지를 불러오는데 실패했습니다.');
+            } finally {
+                this.isLoadingNewer = false;
+            }
+        },
+
+        // 새 메시지 처리 (날짜 구분선 포함)
+        processNewerMessages(messages) {
+            const result = [];
+
+            // newerMessages의 마지막 날짜 또는 messages/SSR의 마지막 날짜
+            let prevDate = null;
+            const lastNewerMsg = this.newerMessages.filter(m => m.type !== 'separator').slice(-1)[0];
+            if (lastNewerMsg) {
+                prevDate = this.extractDate(lastNewerMsg.created_at);
+            } else {
+                // newerMessages가 비어있으면 messages 또는 SSR의 마지막 날짜 사용
+                const lastRealtimeMsg = this.messages.filter(m => m.type !== 'separator').slice(-1)[0];
+                if (lastRealtimeMsg) {
+                    prevDate = this.extractDate(lastRealtimeMsg.created_at);
+                } else {
+                    prevDate = this.lastDate;
+                }
+            }
+
+            for (const msg of messages) {
+                const msgDate = this.extractDate(msg.created_at);
+
+                // 날짜가 변경되면 구분선 추가
+                if (msgDate !== prevDate) {
+                    result.push(this.createSeparator(msgDate));
+                    prevDate = msgDate;
+                }
+
+                result.push({
+                    ...msg,
+                    type: 'message',
+                });
+            }
+
+            return result;
+        },
+
+        // 이전 메시지 처리 (날짜 구분선 포함)
+        processOldMessages(messages) {
+            const result = [];
+
+            // 기존 메시지의 첫 날짜 (oldMessages 첫 메시지 또는 SSR firstDate)
+            const existingFirstMsg = this.oldMessages.find(m => m.type !== 'separator');
+            const existingFirstDate = existingFirstMsg
+                ? this.extractDate(existingFirstMsg.created_at)
+                : this.firstDate;
+
+            // 새 메시지의 마지막 날짜
+            const lastMsgDate = messages.length > 0
+                ? this.extractDate(messages[messages.length - 1].created_at)
+                : null;
+
+            let prevDate = null;
+
+            // 메시지는 시간순 (오래된 것 먼저)
+            for (let i = 0; i < messages.length; i++) {
+                const msg = messages[i];
+                const msgDate = this.extractDate(msg.created_at);
+
+                // 날짜가 변경되면 구분선 추가
+                if (msgDate !== prevDate) {
+                    // 이미 DOM에 해당 날짜 구분선이 있는지 확인
+                    const existsInDOM = document.querySelector(
+                        `.date-separator[data-date="${msgDate}"]`
+                    );
+                    const existsInOld = this.oldMessages.some(
+                        m => m.type === 'separator' && m.date === msgDate
+                    );
+                    // 새 메시지의 마지막 날짜가 기존 첫 날짜와 같으면 해당 구분선 스킵
+                    const skipForExisting = msgDate === lastMsgDate && msgDate === existingFirstDate;
+
+                    if (!existsInDOM && !existsInOld && !skipForExisting) {
+                        result.push(this.createSeparator(msgDate));
+                    }
+                    prevDate = msgDate;
+                }
+
+                result.push({
+                    ...msg,
+                    type: 'message',
+                });
+            }
+
+            return result;
+        },
+
+        // 슬라이딩 윈도우 적용
+        applySlidingWindow(direction) {
+            const totalMessages = this.getTotalMessageCount();
+
+            if (totalMessages <= this.slidingWindowSize) return;
+
+            const excessCount = totalMessages - this.slidingWindowSize + this.slidingWindowBuffer;
+
+            if (direction === 'bottom') {
+                // 위로 스크롤 시: 아래쪽(새 메시지)에서 제거
+                // 제거 전에 마지막 메시지 ID 저장 (스크롤 다운 시 복원용)
+                const lastMsgBeforeRemove = this.getLastMessageId();
+
+                if (this.newerMessages.length > 0) {
+                    // newerMessages에서 먼저 제거
+                    const toRemove = Math.min(excessCount, this.newerMessages.length);
+                    const removed = this.newerMessages.slice(-toRemove);
+                    this.newerMessages = this.newerMessages.slice(0, -toRemove);
+
+                    // 제거된 메시지 중 첫 번째 메시지 ID로 newestMessageId 업데이트
+                    const firstRemovedMsg = removed.find(m => m.type !== 'separator');
+                    if (firstRemovedMsg) {
+                        this.newestMessageId = firstRemovedMsg.id;
+                        this.hasMoreNewer = true;
+                        this.setupBottomSentinel();
+                    }
+
+                    const remaining = excessCount - toRemove;
+                    if (remaining > 0) {
+                        this.removeFromBottomWithTracking(remaining);
+                    }
+                } else if (this.messages.length > 0) {
+                    const toRemove = Math.min(excessCount, this.messages.length);
+                    const removed = this.messages.slice(-toRemove);
+                    this.messages = this.messages.slice(0, -toRemove);
+
+                    // 제거된 메시지 중 첫 번째 메시지 ID로 newestMessageId 업데이트
+                    const firstRemovedMsg = removed.find(m => m.type !== 'separator');
+                    if (firstRemovedMsg) {
+                        this.newestMessageId = firstRemovedMsg.id;
+                        this.hasMoreNewer = true;
+                        this.setupBottomSentinel();
+                    }
+
+                    // SSR 메시지도 DOM에서 제거 필요
+                    const remaining = excessCount - toRemove;
+                    if (remaining > 0) {
+                        this.removeSSRMessagesFromBottomWithTracking(remaining);
+                    }
+                } else {
+                    // messages가 비어있으면 SSR 메시지에서 제거
+                    this.removeSSRMessagesFromBottomWithTracking(excessCount);
+                }
+            } else if (direction === 'top') {
+                // 아래로 스크롤(새 메시지 수신) 시: 위쪽(오래된 메시지)에서 제거
+                if (this.oldMessages.length > 0) {
+                    const toRemove = Math.min(excessCount, this.oldMessages.length);
+                    this.oldMessages = this.oldMessages.slice(toRemove);
+
+                    // oldestMessageId 업데이트
+                    const firstMsg = this.oldMessages.find(m => m.type !== 'separator');
+                    if (firstMsg) {
+                        this.oldestMessageId = firstMsg.id;
+                        this.hasMore = true;  // 제거했으므로 다시 로드 가능
+                    }
+                }
+            }
+        },
+
+        // SSR 메시지 DOM에서 제거 (아래쪽부터) + 스크롤 다운 복원 추적
+        removeSSRMessagesFromBottomWithTracking(count) {
+            if (count <= 0) return;
+
+            const ssrMessages = document.querySelectorAll('#messages-container > .message-item[data-message-id]');
+            const toRemove = Array.from(ssrMessages).slice(-count);
+
+            // 제거되는 첫 번째 메시지 ID 저장
+            if (toRemove.length > 0) {
+                const firstRemovedId = parseInt(toRemove[0].dataset.messageId);
+                if (firstRemovedId) {
+                    this.newestMessageId = firstRemovedId;
+                    this.hasMoreNewer = true;
+                    this.setupBottomSentinel();
+                }
+            }
+
+            toRemove.forEach(el => el.remove());
+
+            // 고아 날짜 구분선 정리
+            this.cleanupOrphanSeparators();
+        },
+
+        // newerMessages/messages가 아닌 곳에서 제거 (재귀 호출용)
+        removeFromBottomWithTracking(count) {
+            if (count <= 0) return;
+
+            if (this.messages.length > 0) {
+                const toRemove = Math.min(count, this.messages.length);
+                const removed = this.messages.slice(-toRemove);
+                this.messages = this.messages.slice(0, -toRemove);
+
+                const firstRemovedMsg = removed.find(m => m.type !== 'separator');
+                if (firstRemovedMsg && !this.newestMessageId) {
+                    this.newestMessageId = firstRemovedMsg.id;
+                    this.hasMoreNewer = true;
+                    this.setupBottomSentinel();
+                }
+
+                const remaining = count - toRemove;
+                if (remaining > 0) {
+                    this.removeSSRMessagesFromBottomWithTracking(remaining);
+                }
+            } else {
+                this.removeSSRMessagesFromBottomWithTracking(count);
+            }
+        },
+
+        // 마지막 메시지 ID 가져오기
+        getLastMessageId() {
+            // newerMessages -> messages -> SSR 순서로 마지막 메시지 찾기
+            const lastNewer = this.newerMessages.filter(m => m.type !== 'separator').slice(-1)[0];
+            if (lastNewer) return lastNewer.id;
+
+            const lastRealtime = this.messages.filter(m => m.type !== 'separator').slice(-1)[0];
+            if (lastRealtime) return lastRealtime.id;
+
+            const ssrMessages = document.querySelectorAll('#messages-container > .message-item[data-message-id]');
+            if (ssrMessages.length > 0) {
+                return parseInt(ssrMessages[ssrMessages.length - 1].dataset.messageId);
+            }
+
+            return null;
+        },
+
+        // SSR 메시지 DOM에서 제거 (아래쪽부터)
+        removeSSRMessagesFromBottom(count) {
+            if (count <= 0) return;
+
+            const ssrMessages = document.querySelectorAll('#messages-container > .message-item[data-message-id]');
+            const toRemove = Array.from(ssrMessages).slice(-count);
+
+            toRemove.forEach(el => el.remove());
+
+            // 고아 날짜 구분선 정리
+            this.cleanupOrphanSeparators();
+        },
+
+        // 고아 날짜 구분선 정리
+        cleanupOrphanSeparators() {
+            const container = this.$refs.messagesContainer;
+            if (!container) return;
+
+            const separators = container.querySelectorAll('.date-separator[data-date]');
+
+            separators.forEach((sep) => {
+                const nextSibling = sep.nextElementSibling;
+
+                // 다음 요소가 없거나 다음 요소가 또 구분선이면 제거
+                if (!nextSibling || nextSibling.classList.contains('date-separator')) {
+                    // 단, oldMessages나 messages에서 사용 중인지 확인
+                    const dateValue = sep.dataset.date;
+                    const usedInOld = this.oldMessages.some(m => m.type === 'separator' && m.date === dateValue);
+                    const usedInNew = this.messages.some(m => m.type === 'separator' && m.date === dateValue);
+
+                    if (!usedInOld && !usedInNew) {
+                        sep.remove();
+                    }
+                }
+            });
+        },
+
+        // 전체 메시지 수 계산
+        getTotalMessageCount() {
+            const ssrCount = document.querySelectorAll('#messages-container > .message-item[data-message-id]').length;
+            const oldCount = this.oldMessages.filter(m => m.type !== 'separator').length;
+            const newCount = this.messages.filter(m => m.type !== 'separator').length;
+            const newerCount = this.newerMessages.filter(m => m.type !== 'separator').length;
+            return ssrCount + oldCount + newCount + newerCount;
         },
 
         connect() {
@@ -347,6 +889,16 @@ function chatApp(roomId, userId, userName) {
         },
 
         disconnect() {
+            // Intersection Observer 정리
+            if (this.observer) {
+                this.observer.disconnect();
+                this.observer = null;
+            }
+            if (this.bottomObserver) {
+                this.bottomObserver.disconnect();
+                this.bottomObserver = null;
+            }
+            // WebSocket 정리
             if (this.ws) {
                 this.ws.close();
                 this.ws = null;
@@ -445,6 +997,10 @@ function chatApp(roomId, userId, userName) {
                 status: 'received'
             });
             this.lastMessageId = message.id;
+
+            // 슬라이딩 윈도우 적용 (위쪽 메시지 제거)
+            this.applySlidingWindow('top');
+
             this.scrollToBottom();
         },
 
