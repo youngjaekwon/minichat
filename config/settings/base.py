@@ -47,6 +47,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "channels",
     "django_structlog",
+    "rest_framework",
 ]
 
 LOCAL_APPS: list[str] = [
@@ -156,6 +157,9 @@ if REDIS_URL:
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
                 "hosts": [REDIS_URL],
+                "capacity": 1500,  # 그룹당 최대 메시지 수
+                "expiry": 10,  # 메시지 만료 시간 (초)
+                "group_expiry": 86400,  # 그룹 만료 시간 (24시간)
             },
         },
     }
@@ -193,6 +197,20 @@ AUTHENTICATION_BACKENDS = [
 LOGIN_URL = "users:login"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "users:login"
+
+
+# Django REST Framework
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+}
 
 
 # Logging with structlog

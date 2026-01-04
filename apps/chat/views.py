@@ -1,7 +1,6 @@
 from datetime import date
 from typing import Any
 
-from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q, QuerySet
@@ -9,9 +8,13 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.generic import DetailView, ListView, View
 
-from apps.chat.forms import MessageForm
+import structlog
+
+from apps.chat.constants import MAX_SYNC_MESSAGES
 from apps.chat.models import Message, Room
 from apps.users.models import User
+
+logger = structlog.get_logger(__name__)
 
 
 class RoomListView(LoginRequiredMixin, ListView):
@@ -34,7 +37,6 @@ class RoomListView(LoginRequiredMixin, ListView):
         context["today"] = date.today()
         context["selected_room"] = None
         context["chat_messages"] = []
-        context["form"] = MessageForm()
         return context
 
 
@@ -48,6 +50,12 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
     def get_object(self, queryset: QuerySet[Room] | None = None) -> Room:
         room = super().get_object(queryset)
         if not room.is_participant(self.request.user):
+            logger.warning(
+                "room_access_denied",
+                reason="not_participant",
+                room_id=room.pk,
+                user_id=self.request.user.pk,
+            )
             raise PermissionDenied("대화방에 참여하지 않은 사용자입니다.")
         return room
 
@@ -63,9 +71,14 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
         context["rooms"] = Room.objects.get_by_user(user).with_latest_message()
         context["today"] = date.today()
 
-        # 메시지 목록
-        context["chat_messages"] = Message.objects.get_by_room(room)
-        context["form"] = MessageForm()
+        # 메시지 목록 (최신 N개만 로드)
+        chat_messages = Message.objects.get_latest_messages(room, MAX_SYNC_MESSAGES)
+        context["chat_messages"] = chat_messages
+
+        # 무한 스크롤을 위한 추가 컨텍스트
+        total_count = Message.objects.filter(room=room).count()
+        context["has_more_messages"] = total_count > MAX_SYNC_MESSAGES
+        context["oldest_message_id"] = chat_messages[0].pk if chat_messages else None
 
         # 1:1 대화인 경우 상대방 정보 (prefetch된 participants에서 조회)
         if room.is_direct:
@@ -76,26 +89,6 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
             context["display_name"] = room.name
 
         return context
-
-
-class SendMessageView(LoginRequiredMixin, View):
-    """메시지 전송 뷰."""
-
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, pk: int) -> HttpResponse:
-        room = get_object_or_404(Room, pk=pk)
-
-        if not room.is_participant(request.user):
-            raise PermissionDenied("대화방에 참여하지 않은 사용자입니다.")
-
-        form = MessageForm(request.POST)
-        if form.is_valid():
-            form.save(room=room, sender=request.user)
-        else:
-            messages.error(request, "메시지를 입력해주세요.")
-
-        return redirect("chat:room_detail", pk=room.pk)
 
 
 class NewConversationView(LoginRequiredMixin, View):
@@ -121,14 +114,32 @@ class NewConversationView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
         user_id = request.POST.get("user_id")
         if not user_id:
+            logger.warning(
+                "new_conversation_failed",
+                reason="user_id_missing",
+                user_id=request.user.pk,
+            )
             return redirect("chat:new_conversation")
 
         try:
             user_id_int = int(user_id)
         except (ValueError, TypeError):
+            logger.warning(
+                "new_conversation_failed",
+                reason="invalid_user_id",
+                user_id=request.user.pk,
+                target_user_id=user_id,
+            )
             return redirect("chat:new_conversation")
 
         other_user = get_object_or_404(User, pk=user_id_int)
         room = Room.objects.get_or_create_direct(request.user, other_user)
+
+        logger.info(
+            "new_conversation_started",
+            room_id=room.pk,
+            user_id=request.user.pk,
+            other_user_id=other_user.pk,
+        )
 
         return redirect("chat:room_detail", pk=room.pk)
