@@ -8,7 +8,6 @@
 {% block content %}
 <div class="h-screen flex bg-white"
      x-data="chatApp({{ selected_room.pk|default:'null' }}, {{ request.user.pk }}, '{{ request.user.name|escapejs }}')"
-     x-init="init()"
      @beforeunload.window="disconnect()"
      >
     <!-- 왼쪽 사이드바: 채팅방 목록 -->
@@ -175,27 +174,39 @@
             {% endif %}
 
             <!-- 실시간 추가 메시지 (Alpine.js) -->
-            <template x-for="msg in messages" :key="msg.id || msg.clientId">
-                <div :class="msg.sender_id === userId ? 'flex justify-end mb-4' : 'flex justify-start mb-4'"
-                     :data-message-id="msg.id">
-                    <div class="max-w-md">
-                        <!-- 상대방 메시지 헤더 -->
-                        <template x-if="msg.sender_id !== userId">
-                            <div class="flex items-center mb-1">
-                                <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
-                                <span class="ml-2 text-sm font-medium text-gray-700" x-text="msg.sender_name"></span>
-                            </div>
-                        </template>
-                        <!-- 메시지 내용 -->
-                        <div :class="msg.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
-                            <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="msg.content"></p>
-                        </div>
-                        <!-- 시간 및 상태 -->
-                        <div :class="msg.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
-                            <span x-text="formatTime(msg.created_at)"></span>
-                            <template x-if="msg.sender_id === userId && msg.status === 'sending'">
-                                <span class="ml-1 text-gray-400">전송 중...</span>
+            <template x-for="item in messages" :key="item.id || item.clientId || item.date">
+                <div>
+                    <!-- 날짜 구분선 -->
+                    <div x-show="item.type === 'separator'"
+                         class="flex items-center justify-center my-6 date-separator"
+                         :data-date="item.date">
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                        <span class="px-4 text-xs text-gray-500" x-text="item.displayDate"></span>
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                    </div>
+                    <!-- 메시지 -->
+                    <div x-show="item.type !== 'separator'"
+                         :class="item.sender_id === userId ? 'flex justify-end mb-4' : 'flex justify-start mb-4'"
+                         :data-message-id="item.id">
+                        <div class="max-w-md">
+                            <!-- 상대방 메시지 헤더 -->
+                            <template x-if="item.sender_id !== userId">
+                                <div class="flex items-center mb-1">
+                                    <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                    <span class="ml-2 text-sm font-medium text-gray-700" x-text="item.sender_name"></span>
+                                </div>
                             </template>
+                            <!-- 메시지 내용 -->
+                            <div :class="item.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
+                                <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="item.content"></p>
+                            </div>
+                            <!-- 시간 및 상태 -->
+                            <div :class="item.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                                <span x-text="formatTime(item.created_at)"></span>
+                                <template x-if="item.sender_id === userId && item.status === 'sending'">
+                                    <span class="ml-1 text-gray-400">전송 중...</span>
+                                </template>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -268,6 +279,7 @@ function chatApp(roomId, userId, userName) {
         messageInput: '',
         messages: [],
         lastMessageId: null,
+        lastDate: null,  // 현재까지의 마지막 날짜 (YYYY-MM-DD)
         pendingMessages: {},
 
         // 에러 표시
@@ -281,6 +293,12 @@ function chatApp(roomId, userId, userName) {
             const lastMessage = document.querySelector('.message-item:last-of-type');
             if (lastMessage) {
                 this.lastMessageId = parseInt(lastMessage.dataset.messageId);
+            }
+
+            // SSR 날짜 구분선에서 마지막 날짜 추출
+            const separators = document.querySelectorAll('.date-separator');
+            if (separators.length > 0) {
+                this.lastDate = separators[separators.length - 1].dataset.date;
             }
 
             this.connect();
@@ -384,6 +402,22 @@ function chatApp(roomId, userId, userName) {
                 return;
             }
 
+            // 날짜 변경 감지 및 구분선 삽입
+            const messageDate = this.extractDate(message.created_at);
+            if (messageDate && messageDate !== this.lastDate) {
+                const separatorExists = this.messages.some(
+                    m => m.type === 'separator' && m.date === messageDate
+                );
+                const domSeparatorExists = document.querySelector(
+                    `.date-separator[data-date="${messageDate}"]`
+                );
+
+                if (!separatorExists && !domSeparatorExists) {
+                    this.messages.push(this.createSeparator(messageDate));
+                }
+                this.lastDate = messageDate;
+            }
+
             // 내가 보낸 메시지의 경우 pending 상태 업데이트
             if (message.sender_id === this.userId) {
                 const pending = Object.values(this.pendingMessages).find(
@@ -464,6 +498,23 @@ function chatApp(roomId, userId, userName) {
 
             // Optimistic UI: 바로 화면에 표시
             const now = new Date().toISOString();
+
+            // 날짜 변경 감지 및 구분선 삽입
+            const messageDate = this.extractDate(now);
+            if (messageDate && messageDate !== this.lastDate) {
+                const separatorExists = this.messages.some(
+                    m => m.type === 'separator' && m.date === messageDate
+                );
+                const domSeparatorExists = document.querySelector(
+                    `.date-separator[data-date="${messageDate}"]`
+                );
+
+                if (!separatorExists && !domSeparatorExists) {
+                    this.messages.push(this.createSeparator(messageDate));
+                }
+                this.lastDate = messageDate;
+            }
+
             const pendingMessage = {
                 clientId: clientId,
                 content: content,
@@ -500,6 +551,32 @@ function chatApp(roomId, userId, userName) {
             const period = hours < 12 ? '오전' : '오후';
             const displayHours = hours % 12 || 12;
             return `${period} ${displayHours}:${minutes}`;
+        },
+
+        // ISO 8601 문자열에서 날짜 부분 추출 (YYYY-MM-DD)
+        extractDate(isoString) {
+            if (!isoString) return null;
+            const date = new Date(isoString);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        },
+
+        // 날짜를 표시 형식으로 변환 (Y. m. d)
+        formatDateDisplay(dateStr) {
+            if (!dateStr) return '';
+            const [year, month, day] = dateStr.split('-');
+            return `${year}. ${month}. ${day}`;
+        },
+
+        // 날짜 구분선 객체 생성
+        createSeparator(dateStr) {
+            return {
+                type: 'separator',
+                date: dateStr,
+                displayDate: this.formatDateDisplay(dateStr)
+            };
         }
     };
 }
