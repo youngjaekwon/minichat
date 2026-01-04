@@ -1,0 +1,109 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: minichat-db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    env_file:
+      - envs/env.dev
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: minichat-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: minichat-migrate
+    volumes:
+      - .:/app
+      - /app/.venv
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - DJANGO_ENV_FILE=env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uv run python manage.py migrate --noinput
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: minichat-server
+    volumes:
+      - .:/app
+      - /app/.venv
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - DJANGO_ENV_FILE=env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: uv run python manage.py runserver 0.0.0.0:8000
+
+  daphne:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: minichat-daphne
+    volumes:
+      - .:/app
+      - /app/.venv
+    ports:
+      - "8001:8001"
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - DJANGO_ENV_FILE=env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: uv run daphne -b 0.0.0.0 -p 8001 config.asgi:application
+
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: minichat-celery
+    volumes:
+      - .:/app
+      - /app/.venv
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - DJANGO_ENV_FILE=env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: uv run celery -A config worker -l INFO
+
+volumes:
+  postgres_data:

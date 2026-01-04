@@ -1,0 +1,561 @@
+{% extends "base.html" %}
+{% load static chat_tags %}
+
+{% block title %}대화 - minichat{% endblock %}
+
+{% block body_class %}h-full overflow-hidden{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/chat/index.js' %}" type="module"></script>
+{% endblock %}
+
+{% block content %}
+<div class="h-screen flex bg-white"
+     x-data="chatApp({{ selected_room.pk|default:'null' }}, {{ request.user.pk }}, '{{ request.user.name|escapejs }}')"
+     @beforeunload.window="disconnect()"
+     @keydown.escape.window="isSearchOpen ? closeSearch() : (sidebarOpen && closeSidebar())"
+     >
+    <!-- 모바일 오버레이 배경 -->
+    <div x-show="sidebarOpen"
+         x-transition:enter="transition-opacity ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition-opacity ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         @click="closeSidebar()"
+         class="md:hidden fixed inset-0 bg-black bg-opacity-50 z-40">
+    </div>
+
+    <!-- 왼쪽 사이드바: 채팅방 목록 -->
+    <div class="w-80 border-r border-gray-200 flex flex-col bg-white
+                fixed md:relative inset-y-0 left-0 z-50
+                transform transition-transform duration-300 ease-in-out
+                md:translate-x-0"
+         :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+        <!-- 헤더 -->
+        <div class="p-4 border-b border-gray-200">
+            <div class="flex justify-end items-center">
+                <a href="{% url 'chat:new_conversation' %}"
+                   class="bg-blue-500 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-full transition">
+                    + 새로운 메세지
+                </a>
+            </div>
+        </div>
+
+        <!-- 검색창 -->
+        <div class="p-4 border-b border-gray-200">
+            <div class="relative">
+                <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </span>
+                <input type="text"
+                       x-model="sidebarSearchQuery"
+                       @input="sidebarSearchError = ''"
+                       @keydown.enter.prevent="searchRooms()"
+                       @keydown.escape="clearSidebarSearch()"
+                       placeholder="대화 검색하기"
+                       class="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                <!-- 검색어 삭제 버튼 -->
+                <button x-show="sidebarSearchQuery || isSidebarSearchMode"
+                        @click="clearSidebarSearch()"
+                        class="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-600">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <!-- 검색 에러 메시지 -->
+            <p x-show="sidebarSearchError"
+               x-text="sidebarSearchError"
+               class="mt-1 text-xs text-red-500"></p>
+        </div>
+
+        <!-- 채팅방 목록 -->
+        <div class="flex-1 overflow-y-auto">
+            <!-- 채팅방 목록 로딩 중 (검색 모드가 아닐 때) -->
+            <div x-show="isLoadingRooms && !isSidebarSearchMode" class="flex items-center justify-center py-12">
+                <svg class="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">대화 목록 불러오는 중...</span>
+            </div>
+
+            <!-- 검색 중 로딩 표시 -->
+            <div x-show="isSearchingSidebar" class="flex items-center justify-center py-12">
+                <svg class="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">검색 중...</span>
+            </div>
+
+            <!-- 검색 결과 목록 -->
+            <template x-if="isSidebarSearchMode && !isSearchingSidebar">
+                <div>
+                    <!-- 검색 결과 있음 -->
+                    <template x-for="result in sidebarSearchResults" :key="result.id">
+                        <a :href="`/chat/${result.id}/`"
+                           @click="closeSidebar()"
+                           class="block hover:bg-gray-50 transition border-l-4"
+                           :class="roomId === result.id ? 'bg-gray-50 border-blue-500' : 'border-transparent'">
+                            <div class="px-4 py-3 flex items-start">
+                                <!-- 프로필 이미지 -->
+                                <div class="w-10 h-10 bg-gray-300 rounded-full flex-shrink-0 flex items-center justify-center">
+                                    <svg class="w-6 h-6 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                                    </svg>
+                                </div>
+                                <!-- 대화 정보 -->
+                                <div class="ml-3 flex-1 min-w-0">
+                                    <h3 class="font-medium text-gray-800 truncate text-sm"
+                                        x-text="result.display_name"></h3>
+                                    <p class="text-sm truncate mt-1 text-gray-500"
+                                       x-html="highlightText(result.matched_message_preview, lastSidebarSearchQuery)"></p>
+                                </div>
+                            </div>
+                        </a>
+                    </template>
+
+                    <!-- 검색 결과 없음 -->
+                    <div x-show="sidebarSearchPerformed && sidebarSearchResults.length === 0"
+                         class="px-4 py-12 text-center text-gray-500">
+                        <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <p class="mb-2">검색 결과가 없습니다</p>
+                        <p class="text-sm text-gray-400">다른 검색어로 시도해보세요</p>
+                    </div>
+
+                    <!-- 이전 검색 결과 불러오기 버튼 -->
+                    <div x-show="hasMoreSearchResults && !isLoadingMoreSearchResults"
+                         class="px-4 py-3 border-t border-gray-200">
+                        <button @click="searchMoreRooms()"
+                                class="w-full py-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition flex items-center justify-center">
+                            이전 검색 결과 불러오기
+                            <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- 검색 결과 추가 로딩 중 -->
+                    <div x-show="isLoadingMoreSearchResults"
+                         class="px-4 py-3 border-t border-gray-200 flex items-center justify-center">
+                        <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="ml-2 text-sm text-gray-500">불러오는 중...</span>
+                    </div>
+                </div>
+            </template>
+
+            <!-- 일반 채팅방 목록 (검색 모드가 아닐 때) -->
+            <template x-if="!isSidebarSearchMode && !isLoadingRooms">
+                <div>
+                    <template x-for="room in rooms" :key="room.id">
+                        <a :href="`/chat/${room.id}/`"
+                           @click="closeSidebar()"
+                           class="block hover:bg-gray-50 transition border-l-4"
+                           :class="roomId === room.id ? 'bg-gray-50 border-blue-500' : 'border-transparent'">
+                            <div class="px-4 py-3 flex items-start">
+                                <!-- 프로필 이미지 -->
+                                <div class="w-10 h-10 bg-gray-300 rounded-full flex-shrink-0 flex items-center justify-center">
+                                    <svg class="w-6 h-6 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                                    </svg>
+                                </div>
+                                <!-- 대화 정보 -->
+                                <div class="ml-3 flex-1 min-w-0">
+                                    <div class="flex justify-between items-center">
+                                        <h3 class="font-medium text-gray-800 truncate text-sm"
+                                            x-text="room.display_name"></h3>
+                                        <span class="text-xs text-gray-400 flex-shrink-0 ml-2"
+                                              x-text="formatRoomTime(room.updated_at, room.is_today)"></span>
+                                    </div>
+                                    <p class="text-sm truncate mt-1"
+                                       :class="room.last_message_preview ? 'text-gray-500' : 'text-gray-400'"
+                                       x-text="room.last_message_preview || '아직 메시지가 없습니다'"></p>
+                                </div>
+                            </div>
+                        </a>
+                    </template>
+
+                    <!-- 대화 없음 상태 -->
+                    <div x-show="rooms.length === 0"
+                         class="px-4 py-12 text-center text-gray-500">
+                        <p class="mb-4">참여 중인 대화가 없습니다.</p>
+                        <a href="{% url 'chat:new_conversation' %}" class="text-blue-500 hover:underline">
+                            새 대화를 시작해보세요
+                        </a>
+                    </div>
+
+                    <!-- 이전 대화 불러오기 버튼 -->
+                    <div x-show="hasMoreRooms && !isLoadingMoreRooms"
+                         class="px-4 py-3 border-t border-gray-200">
+                        <button @click="loadMoreRooms()"
+                                class="w-full py-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition flex items-center justify-center">
+                            이전 대화 불러오기
+                            <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- 대화 목록 추가 로딩 중 -->
+                    <div x-show="isLoadingMoreRooms"
+                         class="px-4 py-3 border-t border-gray-200 flex items-center justify-center">
+                        <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="ml-2 text-sm text-gray-500">불러오는 중...</span>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+    </div>
+
+    <!-- 오른쪽: 대화 내용 -->
+    <div class="flex-1 flex flex-col relative">
+        {% if selected_room %}
+        <!-- 상대방 정보 헤더 -->
+        <div class="p-4 border-b border-gray-200">
+            <div class="flex justify-between items-start">
+                <div class="flex items-start">
+                    <!-- 햄버거 버튼 (모바일) -->
+                    <button @click="toggleSidebar()"
+                            class="md:hidden p-2 -ml-2 mr-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg flex-shrink-0"
+                            aria-label="대화 목록 열기"
+                            :aria-expanded="sidebarOpen">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                        </svg>
+                    </button>
+                    <div>
+                        <h2 class="text-lg font-medium text-gray-800">{{ display_name }}</h2>
+                        {% if selected_room.is_direct and other_user and other_user.job_title %}
+                        <p class="text-purple-500 text-sm mt-1">{{ other_user.job_title }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+                <!-- 검색 버튼 -->
+                <button @click="toggleSearch()"
+                        class="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"
+                        :class="{ 'bg-gray-100 text-gray-700': isSearchOpen }"
+                        title="메시지 검색 (Ctrl+F)">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- 검색 바 -->
+        <div x-show="isSearchOpen"
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0 -translate-y-2"
+             x-transition:enter-end="opacity-100 translate-y-0"
+             x-transition:leave="transition ease-in duration-150"
+             x-transition:leave-start="opacity-100 translate-y-0"
+             x-transition:leave-end="opacity-0 -translate-y-2"
+             class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+            <div class="flex items-center gap-2">
+                <!-- 검색 입력 -->
+                <div class="flex-1 relative">
+                    <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </span>
+                    <input type="text"
+                           x-ref="searchInput"
+                           x-model="searchQuery"
+                           @keydown.enter.prevent="searchQuery.length >= 2 ? (searchCurrentIndex < searchResults.length - 1 ? navigateSearch(1) : performSearch()) : performSearch(true)"
+                           @keydown.shift.enter.prevent="navigateSearch(-1)"
+                           @keydown.escape="closeSearch()"
+                           @input="searchError = ''"
+                           placeholder="메시지 검색 (최소 2자)"
+                           class="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                <!-- 결과 카운터 -->
+                <div x-show="searchResults.length > 0" class="text-sm text-gray-500 whitespace-nowrap">
+                    <span x-text="searchCurrentIndex + 1"></span>/<span x-text="searchResults.length"></span>
+                </div>
+                <!-- 네비게이션 버튼 -->
+                <div class="flex gap-1">
+                    <button @click="navigateSearch(-1)"
+                            :disabled="searchResults.length === 0"
+                            class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="이전 결과 (Shift+Enter)">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
+                        </svg>
+                    </button>
+                    <button @click="navigateSearch(1)"
+                            :disabled="searchResults.length === 0"
+                            class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="다음 결과 (Enter)">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                </div>
+                <!-- 닫기 버튼 -->
+                <button @click="closeSearch()"
+                        class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded"
+                        title="닫기 (Esc)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <!-- 검색 상태 메시지 -->
+            <div x-show="searchError" class="mt-2 text-xs text-red-500" x-text="searchError"></div>
+            <div x-show="isSearching" class="mt-2 text-xs text-gray-500">
+                검색 중...
+            </div>
+            <div x-show="!isSearching && searchQuery.length >= 2 && searchResults.length === 0 && searchPerformed" class="mt-2 text-xs text-gray-500">
+                검색 결과가 없습니다
+            </div>
+        </div>
+
+        <!-- 메시지 목록 -->
+        <div class="flex-1 overflow-y-auto bg-gray-50 p-4" id="messages-container" x-ref="messagesContainer">
+            <!-- 연결 상태 표시 -->
+            <div x-show="connectionState !== 'connected'" class="flex items-center justify-center py-2 mb-4">
+                <template x-if="connectionState === 'connecting'">
+                    <span class="text-sm text-yellow-600 bg-yellow-100 px-3 py-1 rounded-full">연결 중...</span>
+                </template>
+                <template x-if="connectionState === 'reconnecting'">
+                    <span class="text-sm text-orange-600 bg-orange-100 px-3 py-1 rounded-full">재연결 중... (시도 <span x-text="reconnectAttempts"></span>/10)</span>
+                </template>
+                <template x-if="connectionState === 'disconnected'">
+                    <span class="text-sm text-red-600 bg-red-100 px-3 py-1 rounded-full">연결 끊김</span>
+                </template>
+            </div>
+
+            <!-- 더 이상 메시지 없음 표시 -->
+            <div x-show="!hasMore && oldMessages.length > 0" class="flex justify-center py-4">
+                <span class="text-sm text-gray-400">대화의 시작입니다</span>
+            </div>
+
+            <!-- 로딩 센티널 (무한 스크롤 트리거) -->
+            <div x-show="hasMore && !isLoadingMore"
+                 x-ref="loadMoreSentinel"
+                 class="flex justify-center py-4">
+                <span class="text-sm text-gray-400">위로 스크롤하여 이전 메시지 불러오기</span>
+            </div>
+
+            <!-- 로딩 중 표시 -->
+            <div x-show="isLoadingMore" class="flex justify-center py-4">
+                <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">이전 메시지 불러오는 중...</span>
+            </div>
+
+            <!-- 초기 로딩 표시 -->
+            <div x-show="isInitialLoading" class="flex items-center justify-center py-8">
+                <svg class="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">메시지 불러오는 중...</span>
+            </div>
+
+            <!-- 메시지 영역 (API로 로드된 메시지) -->
+            <template x-for="item in oldMessages" :key="item.id || item.date">
+                <div>
+                    <!-- 날짜 구분선 -->
+                    <div x-show="item.type === 'separator'"
+                         class="flex items-center justify-center my-6 date-separator"
+                         :data-date="item.date">
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                        <span class="px-4 text-xs text-gray-500" x-text="item.displayDate"></span>
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                    </div>
+                    <!-- 메시지 -->
+                    <div x-show="item.type !== 'separator'"
+                         class="message-item"
+                         :class="item.sender_id === userId ? 'flex justify-end mb-4' : 'flex justify-start mb-4'"
+                         :data-message-id="item.id">
+                        <div class="max-w-[85%] sm:max-w-md">
+                            <!-- 상대방 메시지 헤더 -->
+                            <template x-if="item.sender_id !== userId">
+                                <div class="flex items-center mb-1">
+                                    <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                    <span class="ml-2 text-sm font-medium text-gray-700" x-text="item.sender_name"></span>
+                                </div>
+                            </template>
+                            <!-- 메시지 내용 -->
+                            <div :class="item.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
+                                <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="item.content"></p>
+                            </div>
+                            <!-- 시간 -->
+                            <div :class="item.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                                <span x-text="formatTime(item.created_at)"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- 빈 상태 메시지 -->
+            <div x-show="!isInitialLoading && oldMessages.length === 0 && messages.length === 0" class="flex items-center justify-center h-full text-gray-500">
+                아직 메시지가 없습니다. 첫 메시지를 보내보세요!
+            </div>
+
+            <!-- 실시간 추가 메시지 (Alpine.js) -->
+            <template x-for="item in messages" :key="item.id || item.clientId || item.date">
+                <div>
+                    <!-- 날짜 구분선 -->
+                    <div x-show="item.type === 'separator'"
+                         class="flex items-center justify-center my-6 date-separator"
+                         :data-date="item.date">
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                        <span class="px-4 text-xs text-gray-500" x-text="item.displayDate"></span>
+                        <div class="border-t border-gray-300 flex-grow"></div>
+                    </div>
+                    <!-- 메시지 -->
+                    <div x-show="item.type !== 'separator'"
+                         :class="item.sender_id === userId ? 'flex justify-end mb-4' : 'flex justify-start mb-4'"
+                         :data-message-id="item.id">
+                        <div class="max-w-[85%] sm:max-w-md">
+                            <!-- 상대방 메시지 헤더 -->
+                            <template x-if="item.sender_id !== userId">
+                                <div class="flex items-center mb-1">
+                                    <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                    <span class="ml-2 text-sm font-medium text-gray-700" x-text="item.sender_name"></span>
+                                </div>
+                            </template>
+                            <!-- 메시지 내용 -->
+                            <div :class="item.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
+                                <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="item.content"></p>
+                            </div>
+                            <!-- 시간 및 상태 -->
+                            <div :class="item.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                                <span x-text="formatTime(item.created_at)"></span>
+                                <template x-if="item.sender_id === userId && item.status === 'sending'">
+                                    <span class="ml-1 text-gray-400">전송 중...</span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- 하단 로딩 센티널 (검색 후 아래로 스크롤용) -->
+            <div x-show="hasMoreAfter && !isLoadingMoreAfter"
+                 x-ref="loadMoreAfterSentinel"
+                 class="flex justify-center py-4">
+                <span class="text-sm text-gray-400">아래로 스크롤하여 이후 메시지 불러오기</span>
+            </div>
+
+            <!-- 하단 로딩 중 표시 -->
+            <div x-show="isLoadingMoreAfter" class="flex justify-center py-4">
+                <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">이후 메시지 불러오는 중...</span>
+            </div>
+
+        </div>
+
+        <!-- 새 메시지 토스트 / 최신으로 이동 버튼 -->
+        <div x-show="showNewMessageToast || !isNearBottom"
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0 translate-y-2"
+             x-transition:enter-end="opacity-100 translate-y-0"
+             x-transition:leave="transition ease-in duration-150"
+             x-transition:leave-start="opacity-100 translate-y-0"
+             x-transition:leave-end="opacity-0 translate-y-2"
+             @click="scrollToBottomAndHideToast()"
+             class="absolute bottom-24 sm:bottom-32 md:bottom-48 left-1/2 transform -translate-x-1/2 z-10 cursor-pointer">
+            <!-- 새 메시지가 있는 경우 -->
+            <div x-show="showNewMessageToast" class="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                </svg>
+                <span class="text-sm font-medium">
+                    새 메시지 <span x-text="newMessageCount"></span>개
+                </span>
+            </div>
+            <!-- 새 메시지가 없고 스크롤이 위에 있는 경우 -->
+            <div x-show="!showNewMessageToast && !isNearBottom" class="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-full shadow-lg transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                </svg>
+                <span class="text-sm font-medium">최신으로</span>
+            </div>
+        </div>
+
+        <!-- 에러 메시지 표시 -->
+        <div x-show="errorMessage"
+             x-transition
+             class="mx-2 sm:mx-4 mt-2 px-3 sm:px-4 py-2 bg-red-100 border border-red-300 text-red-700 text-sm rounded">
+            <span x-text="errorMessage"></span>
+        </div>
+
+        <!-- 메시지 입력 -->
+        <div class="p-2 sm:p-4 border-t border-gray-200 bg-white">
+            <form @submit.prevent="sendMessage()">
+                <div class="border border-gray-300 rounded-lg overflow-hidden">
+                    <textarea
+                        x-model="messageInput"
+                        rows="3"
+                        placeholder="내용 작성해 주세요."
+                        class="w-full px-4 py-3 focus:outline-none resize-none text-sm"
+                        @keydown.enter="if (!$event.shiftKey && !$event.isComposing) { $event.preventDefault(); sendMessage(); }"
+                        :disabled="connectionState !== 'connected'"
+                        :maxlength="maxMessageLength"
+                    ></textarea>
+                    <div class="flex justify-end px-4 py-2 bg-gray-50 border-t border-gray-200">
+                        <button type="submit"
+                                class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                :disabled="connectionState !== 'connected' || !messageInput.trim()">
+                            보내기
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        {% else %}
+        <!-- 선택된 대화가 없을 때 -->
+        <div class="flex-1 flex flex-col bg-gray-50">
+            <!-- 모바일용 헤더 -->
+            <div class="md:hidden p-4 border-b border-gray-200 bg-white">
+                <button @click="toggleSidebar()"
+                        class="p-2 -ml-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                        aria-label="대화 목록 열기"
+                        :aria-expanded="sidebarOpen">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="flex-1 flex items-center justify-center">
+                <div class="text-center text-gray-500">
+                    <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                    </svg>
+                    <p>대화를 선택해주세요</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

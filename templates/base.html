@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}minichat{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {% block extra_js %}{% endblock %}
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+</head>
+<body class="{% block body_class %}bg-gray-100 min-h-screen{% endblock %}">
+    {% if messages %}
+    <div class="fixed top-4 left-4 right-4 sm:left-auto sm:right-4 z-50 space-y-2">
+        {% for message in messages %}
+        <div class="px-4 py-3 rounded shadow-lg {% if message.tags == 'success' %}bg-teal-500{% elif message.tags == 'error' %}bg-red-500{% else %}bg-teal-500{% endif %} text-white">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+</body>
+</html>

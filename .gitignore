@@ -8,3 +8,35 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Django
+*.log
+db.sqlite3
+staticfiles/
+media/
+
+# Environment variables
+.env
+.env.local
+envs/env.*
+!envs/env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Coverage
+.coverage
+htmlcov/
+
+# pytest
+.pytest_cache/
+
+# mypy / pyright
+.mypy_cache/
+.pyright/
+
+# ruff
+.ruff_cache/
