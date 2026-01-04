@@ -7,6 +7,8 @@ class MessageType(StrEnum):
     CHAT_MESSAGE = "chat_message"
     MESSAGE_ACK = "message_ack"
     ERROR = "error"
+    READ_STATUS = "read_status"
+    SIDEBAR_UPDATE = "sidebar_update"
 
 
 class AckStatus(StrEnum):

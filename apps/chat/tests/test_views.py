@@ -7,7 +7,7 @@ from django.urls import reverse
 import pytest
 
 from apps.chat.models import Room
-from tests.factories import MessageFactory, RoomFactory, UserFactory
+from tests.factories import MessageFactory, MessageReadFactory, RoomFactory, UserFactory
 
 
 @pytest.mark.django_db
@@ -60,6 +60,59 @@ class TestRoomListView:
         assert response.status_code == 200
         assert len(response.context["rooms"]) == 0
 
+    def test_includes_unread_counts(self, client):
+        """안읽은 메시지 수가 컨텍스트에 포함된다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        room = RoomFactory(created_by=other_user, participants=[user])
+
+        # other_user가 보낸 메시지 3개
+        MessageFactory(room=room, sender=other_user, content="메시지1")
+        MessageFactory(room=room, sender=other_user, content="메시지2")
+        MessageFactory(room=room, sender=other_user, content="메시지3")
+
+        client.force_login(user)
+        response = client.get(reverse("chat:room_list"))
+
+        assert response.status_code == 200
+        assert "unread_counts" in response.context
+        assert response.context["unread_counts"].get(room.pk, 0) == 3
+
+    def test_unread_counts_excludes_own_messages(self, client):
+        """자신이 보낸 메시지는 안읽은 수에 포함되지 않는다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        room = RoomFactory(created_by=user, participants=[other_user])
+
+        # user가 보낸 메시지
+        MessageFactory(room=room, sender=user, content="내 메시지")
+        # other_user가 보낸 메시지
+        MessageFactory(room=room, sender=other_user, content="상대방 메시지")
+
+        client.force_login(user)
+        response = client.get(reverse("chat:room_list"))
+
+        # user 기준 안읽은 수는 1 (상대방 메시지만)
+        assert response.context["unread_counts"].get(room.pk, 0) == 1
+
+    def test_unread_counts_excludes_read_messages(self, client):
+        """읽은 메시지는 안읽은 수에 포함되지 않는다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        room = RoomFactory(created_by=other_user, participants=[user])
+
+        msg1 = MessageFactory(room=room, sender=other_user, content="메시지1")
+        MessageFactory(room=room, sender=other_user, content="메시지2")
+
+        # msg1만 읽음 처리
+        MessageReadFactory(message=msg1, user=user)
+
+        client.force_login(user)
+        response = client.get(reverse("chat:room_list"))
+
+        # 1개 읽음, 1개 안읽음
+        assert response.context["unread_counts"].get(room.pk, 0) == 1
+
 
 @pytest.mark.django_db
 class TestRoomDetailView:
@@ -110,6 +163,40 @@ class TestRoomDetailView:
         response = client.get(reverse("chat:room_detail", args=[room.pk]))
 
         assert response.context["other_user"] == other_user
+
+    def test_includes_participant_count(self, client):
+        """참여자 수가 컨텍스트에 포함된다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        room = RoomFactory(created_by=user, participants=[other_user])
+
+        client.force_login(user)
+        response = client.get(reverse("chat:room_detail", args=[room.pk]))
+
+        assert response.context["participant_count"] == 2
+
+    def test_includes_unread_counts(self, client):
+        """채팅방 목록의 안읽은 메시지 수가 컨텍스트에 포함된다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        third_user = UserFactory()
+
+        room1 = RoomFactory(created_by=other_user, participants=[user])
+        room2 = RoomFactory(created_by=third_user, participants=[user])
+
+        # room1: other_user가 보낸 메시지 2개
+        MessageFactory(room=room1, sender=other_user, content="room1 메시지1")
+        MessageFactory(room=room1, sender=other_user, content="room1 메시지2")
+
+        # room2: third_user가 보낸 메시지 1개
+        MessageFactory(room=room2, sender=third_user, content="room2 메시지1")
+
+        client.force_login(user)
+        response = client.get(reverse("chat:room_detail", args=[room1.pk]))
+
+        assert "unread_counts" in response.context
+        assert response.context["unread_counts"].get(room1.pk, 0) == 2
+        assert response.context["unread_counts"].get(room2.pk, 0) == 1
 
 
 @pytest.mark.django_db

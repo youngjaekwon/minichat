@@ -23,8 +23,14 @@ from apps.chat.messages import (
     IncomingMessageAdapter,
     MessageAckMessage,
     MessagePayload,
+    ReadStatusMessage,
+    SidebarUpdateMessage,
 )
 from apps.chat.models import Message, Room
+from apps.chat.tasks import (
+    broadcast_sidebar_update,
+    save_read_status,
+)
 from apps.users.models import User
 
 logger = structlog.get_logger(__name__)
@@ -38,17 +44,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.room_id: int | None = None
         self.room: Room | None = None
         self.room_group_name: str | None = None
+        self.user_group_name: str | None = None
         self.user: User | None = None
         self.last_message_id: int | None = None
 
     async def connect(self) -> None:
         """WebSocket 연결 시 호출.
 
-        1. 인증 확인
-        2. Room 존재 여부 확인
-        3. 참여자 검증
-        4. Channel Layer 그룹 참가
-        5. 누락 메시지 동기화
+        room_id가 있는 경우:
+            1. 인증 확인
+            2. Room 존재 여부 확인
+            3. 참여자 검증
+            4. Channel Layer 그룹 참가 (room + user)
+            5. 안읽은 메시지 읽음 처리
+            6. 누락 메시지 동기화
+
+        room_id가 없는 경우 (사이드바 전용):
+            1. 인증 확인
+            2. Channel Layer user 그룹 참가
         """
         self.user = self.scope.get("user")
 
@@ -61,15 +74,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close(code=CLOSE_CODE_UNAUTHORIZED)
             return
 
-        # 2. Room ID 추출
+        # 2. Room ID 추출 (optional)
         self.room_id = self.scope["url_route"]["kwargs"].get("room_id")
+
+        # room_id가 없으면 user group에만 연결
         if not self.room_id:
-            logger.warning(
-                "websocket_connection_rejected",
-                reason="room_id_missing",
+            self.user_group_name = f"user_chat_rooms_{self.user.pk}"
+            await self.channel_layer.group_add(self.user_group_name, self.channel_name)
+            await self.accept()
+
+            logger.info(
+                "websocket_connected_user_only",
                 user_id=self.user.pk,
             )
-            await self.close(code=CLOSE_CODE_NOT_FOUND)
             return
 
         # 3. Room 존재 여부 확인
@@ -96,9 +113,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close(code=CLOSE_CODE_FORBIDDEN)
             return
 
-        # 5. Channel Layer 그룹 참가
+        # 5. Channel Layer 그룹 참가 (대화방 + 사용자별)
         self.room_group_name = f"chat_room_{self.room_id}"
+        self.user_group_name = f"user_chat_rooms_{self.user.pk}"
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        await self.channel_layer.group_add(self.user_group_name, self.channel_name)
 
         # 연결 수락
         await self.accept()
@@ -109,7 +128,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
             user_id=self.user.pk,
         )
 
-        # 6. 누락 메시지 동기화 (쿼리 파라미터에서 last_message_id 추출)
+        # 6. 안읽은 메시지 읽음 처리
+        await self._mark_messages_as_read()
+
+        # 7. 누락 메시지 동기화 (쿼리 파라미터에서 last_message_id 추출)
         query_string = self.scope.get("query_string", b"").decode()
         query_params = parse_qs(query_string)
         last_message_id_param = query_params.get("last_message_id", [None])[0]
@@ -141,8 +163,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 self.room_group_name, self.channel_name
             )
 
+        if self.user_group_name:
+            await self.channel_layer.group_discard(
+                self.user_group_name, self.channel_name
+            )
+
     async def receive(self, text_data: str | None = None, **kwargs: Any) -> None:
         """클라이언트로부터 메시지 수신 시 호출."""
+        # room이 없으면 메시지 전송 불가 (사이드바 전용 연결)
+        if not self.room:
+            return
+
         if not text_data:
             logger.warning(
                 "message_received_empty",
@@ -193,6 +224,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
             message_id=message.pk,
         )
 
+        # 참여자 수 조회 (새 메시지의 unread_count 계산용)
+        participant_ids = await self._get_participant_ids()
+        unread_count = len(participant_ids) - 1  # 발신자 제외
+
         # 그룹에 메시지 브로드캐스트
         broadcast_msg = ChatReceivedMessage(
             message=MessagePayload(
@@ -201,6 +236,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 sender_id=self.user.pk,
                 sender_name=self.user.name,
                 created_at=message.created_at.isoformat(),
+                unread_count=unread_count,
             )
         )
         await self.channel_layer.group_send(
@@ -216,9 +252,33 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
             await self.send(text_data=ack_msg.model_dump_json())
 
+        # 사이드바 업데이트 브로드캐스트 (Celery 비동기)
+        # Note: get_preview() 대신 직접 슬라이싱 (비동기 컨텍스트 호환)
+        preview = (
+            message.content[:50] + "..."
+            if len(message.content) > 50
+            else message.content
+        )
+        await self._broadcast_sidebar_update(
+            room_id=self.room_id,
+            participant_ids=participant_ids,
+            last_message_content=preview,
+            last_message_time=message.created_at.isoformat(),
+        )
+
     async def chat_message(self, event: dict[str, Any]) -> None:
         """Channel Layer에서 메시지 수신 후 클라이언트에 전송."""
         msg = ChatReceivedMessage(**event)
+        await self.send(text_data=msg.model_dump_json())
+
+    async def read_status(self, event: dict[str, Any]) -> None:
+        """Channel Layer에서 읽음 상태 수신 후 클라이언트에 전송."""
+        msg = ReadStatusMessage(**event)
+        await self.send(text_data=msg.model_dump_json())
+
+    async def sidebar_update(self, event: dict[str, Any]) -> None:
+        """Channel Layer에서 사이드바 업데이트 수신 후 클라이언트에 전송."""
+        msg = SidebarUpdateMessage(**event)
         await self.send(text_data=msg.model_dump_json())
 
     async def _send_error(self, code: str, message: str) -> None:
@@ -231,7 +291,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if not self.last_message_id or not self.room:
             return
 
-        missed_messages = await self._get_missed_messages(
+        missed_messages = await self._get_missed_messages_with_unread_count(
             self.room, self.last_message_id
         )
 
@@ -252,9 +312,36 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     sender_id=message.sender_id,
                     sender_name=message.sender.name if message.sender else "알 수 없음",
                     created_at=message.created_at.isoformat(),
+                    unread_count=message.unread_count,
                 )
             )
             await self.send(text_data=sync_msg.model_dump_json())
+
+    async def _mark_messages_as_read(self) -> None:
+        """안읽은 메시지를 읽음 처리하고 채팅방에 브로드캐스트한다."""
+        if not self.room or not self.user:
+            return
+
+        message_ids = await self._get_unread_message_ids()
+
+        if message_ids:
+            # 채팅방 그룹에 즉시 읽음 상태 브로드캐스트 (실시간 반영)
+            read_status_msg = ReadStatusMessage(
+                room_id=self.room_id,
+                message_ids=message_ids,
+                reader_id=self.user.pk,
+            )
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                read_status_msg.model_dump(),
+            )
+
+            # Celery task로 DB에 읽음 상태 저장 (비동기)
+            await self._save_read_status(
+                room_id=self.room_id,
+                user_id=self.user.pk,
+                message_ids=message_ids,
+            )
 
     # Database helper methods (sync_to_async wrapped)
 
@@ -281,10 +368,58 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     @sync_to_async
-    def _get_missed_messages(self, room: Room, last_message_id: int) -> list[Message]:
-        """누락된 메시지를 조회한다 (최대 MAX_SYNC_MESSAGES개)."""
+    def _get_missed_messages_with_unread_count(
+        self, room: Room, last_message_id: int
+    ) -> list[Message]:
+        """누락된 메시지를 unread_count와 함께 조회한다 (최대 MAX_SYNC_MESSAGES개)."""
         return list(
             Message.objects.filter(room=room, pk__gt=last_message_id)
             .select_related("sender")
+            .with_unread_count()
             .order_by("created_at")[:MAX_SYNC_MESSAGES]
+        )
+
+    @sync_to_async
+    def _get_unread_message_ids(self) -> list[int]:
+        """안읽은 메시지 ID 목록을 조회한다."""
+        return list(
+            Message.objects.filter(room=self.room)
+            .exclude(sender=self.user)
+            .exclude(reads__user=self.user)
+            .values_list("pk", flat=True)
+        )
+
+    @sync_to_async
+    def _get_participant_ids(self) -> list[int]:
+        """대화방 참여자 ID 목록을 반환한다."""
+        return list(self.room.participants.values_list("pk", flat=True))
+
+    @sync_to_async
+    def _broadcast_sidebar_update(
+        self,
+        room_id: int,
+        participant_ids: list[int],
+        last_message_content: str,
+        last_message_time: str,
+    ) -> None:
+        """사이드바 업데이트를 브로드캐스트한다."""
+        broadcast_sidebar_update.delay(
+            room_id=room_id,
+            participant_ids=participant_ids,
+            last_message_content=last_message_content,
+            last_message_time=last_message_time,
+        )
+
+    @sync_to_async
+    def _save_read_status(
+        self,
+        room_id: int,
+        user_id: int,
+        message_ids: list[int],
+    ) -> None:
+        """읽음 상태를 저장한다."""
+        save_read_status.delay(
+            room_id=room_id,
+            user_id=user_id,
+            message_ids=message_ids,
         )

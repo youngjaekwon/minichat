@@ -418,6 +418,37 @@ export function createMessageManager(app) {
         },
 
         /**
+         * 읽음 상태 업데이트 처리
+         * @param {Object} data - 읽음 상태 데이터 (room_id, message_ids, reader_id)
+         */
+        handleReadStatus(data) {
+            // 현재 채팅방이 아니면 무시
+            if (data.room_id !== app.roomId) {
+                return;
+            }
+
+            const messageIds = new Set(data.message_ids);
+
+            // oldMessages에서 unread_count 감소
+            for (const msg of app.oldMessages) {
+                if (msg.type === 'message' && messageIds.has(msg.id)) {
+                    if (msg.unread_count > 0) {
+                        msg.unread_count--;
+                    }
+                }
+            }
+
+            // messages에서 unread_count 감소
+            for (const msg of app.messages) {
+                if (msg.type !== 'separator' && messageIds.has(msg.id)) {
+                    if (msg.unread_count > 0) {
+                        msg.unread_count--;
+                    }
+                }
+            }
+        },
+
+        /**
          * 메시지 전송
          */
         sendMessage() {
@@ -463,6 +494,7 @@ export function createMessageManager(app) {
                 sender_name: app.userName,
                 created_at: now,
                 status: 'sending',
+                unread_count: app.participantCount - 1, // 발신자 제외
             };
 
             app.messages.push(pendingMessage);

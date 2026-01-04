@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from django.contrib.postgres.indexes import GinIndex
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
-from django.db.models import OuterRef, Prefetch, QuerySet, Subquery
+from django.db.models import Count, OuterRef, Prefetch, QuerySet, Subquery
 from django.db.models.signals import m2m_changed
 from django.dispatch import receiver
 
 import structlog
 
 from apps.users.models import User
+
+if TYPE_CHECKING:
+    from django.db.models import QuerySet as QS
 
 logger = structlog.get_logger(__name__)
 
@@ -252,6 +257,18 @@ class MessageQuerySet(QuerySet["Message"]):
         """sender를 select_related로 조회."""
         return self.select_related("sender")
 
+    def with_unread_count(self) -> MessageQuerySet:
+        """메시지별 안읽은 인원 수를 annotate한다.
+
+        unread_count = 대화방 참여자 수 - 읽은 사람 수 - 1 (발신자 제외)
+        """
+        return self.annotate(
+            read_count=Count("reads"),
+            unread_count=models.F("room__participant_count")
+            - models.F("read_count")
+            - 1,  # 발신자 제외
+        )
+
 
 class MessageManager(models.Manager["Message"]):
     """Message 모델의 커스텀 매니저."""
@@ -261,7 +278,13 @@ class MessageManager(models.Manager["Message"]):
 
     def get_by_room(self, room: Room) -> MessageQuerySet:
         """해당 대화방의 메시지를 생성 시간 오름차순으로 반환한다."""
-        return self.get_queryset().for_room(room).with_sender().ordered_by_created_asc()
+        return (
+            self.get_queryset()
+            .for_room(room)
+            .with_sender()
+            .with_unread_count()
+            .ordered_by_created_asc()
+        )
 
     def get_latest_messages(self, room: Room, limit: int) -> list[Message]:
         """해당 대화방의 최신 메시지를 limit 개수만큼 반환한다.
@@ -273,6 +296,7 @@ class MessageManager(models.Manager["Message"]):
             self.get_queryset()
             .for_room(room)
             .with_sender()
+            .with_unread_count()
             .ordered_by_created_desc()[:limit]
         )
         return list(reversed(messages))
@@ -295,6 +319,7 @@ class MessageManager(models.Manager["Message"]):
             .for_room(room)
             .before_cursor(cursor_id)
             .with_sender()
+            .with_unread_count()
             .ordered_by_created_desc()[: limit + 1]
         )
 
@@ -323,6 +348,7 @@ class MessageManager(models.Manager["Message"]):
             .for_room(room)
             .after_cursor(cursor_id)
             .with_sender()
+            .with_unread_count()
             .ordered_by_created_asc()[: limit + 1]
         )
 
@@ -354,6 +380,7 @@ class MessageManager(models.Manager["Message"]):
             .for_room(room)
             .filter(pk__lte=cursor_id)
             .with_sender()
+            .with_unread_count()
             .ordered_by_created_desc()[: half + 2]
         )
         has_more_before = len(before_messages) > half + 1
@@ -367,6 +394,7 @@ class MessageManager(models.Manager["Message"]):
             .for_room(room)
             .after_cursor(cursor_id)
             .with_sender()
+            .with_unread_count()
             .ordered_by_created_asc()[: half + 1]
         )
         has_more_after = len(after_messages) > half
@@ -459,3 +487,120 @@ def update_participant_count(
     if action in ("post_add", "post_remove", "post_clear"):
         instance.participant_count = instance.participants.count()
         instance.save(update_fields=["participant_count"])
+
+
+class MessageReadManager(models.Manager["MessageRead"]):
+    """MessageRead 모델의 커스텀 매니저."""
+
+    def mark_as_read(self, room: Room, user: User) -> tuple[list[int], list[int]]:
+        """대화방의 안읽은 메시지를 일괄 읽음 처리한다.
+
+        Args:
+            room: 대화방
+            user: 읽음 처리할 사용자
+
+        Returns:
+            (읽음 처리된 메시지 ID 목록, 해당 메시지 발신자 ID 목록) 튜플
+        """
+        # 자신이 보낸 메시지를 제외한 안읽은 메시지 조회
+        unread_messages = (
+            Message.objects.filter(room=room)
+            .exclude(sender=user)
+            .exclude(reads__user=user)
+            .select_related("sender")
+        )
+
+        message_ids: list[int] = []
+        sender_ids: set[int] = set()
+
+        # 읽음 기록 생성
+        read_records = []
+        for message in unread_messages:
+            read_records.append(
+                self.model(message=message, user=user)
+            )
+            message_ids.append(message.pk)
+            if message.sender_id:
+                sender_ids.add(message.sender_id)
+
+        if read_records:
+            self.bulk_create(read_records, ignore_conflicts=True)
+            logger.info(
+                "messages_marked_as_read",
+                room_id=room.pk,
+                user_id=user.pk,
+                message_count=len(message_ids),
+            )
+
+        return message_ids, list(sender_ids)
+
+    def get_unread_count(self, room: Room, user: User) -> int:
+        """사용자의 해당 방 안읽은 메시지 수를 반환한다."""
+        return (
+            Message.objects.filter(room=room)
+            .exclude(sender=user)
+            .exclude(reads__user=user)
+            .count()
+        )
+
+    def get_unread_counts_for_rooms(
+        self, rooms: QS[Room], user: User
+    ) -> dict[int, int]:
+        """여러 채팅방의 안읽은 메시지 수를 한 번에 조회한다.
+
+        Args:
+            rooms: 채팅방 QuerySet
+            user: 사용자
+
+        Returns:
+            {room_id: unread_count} 딕셔너리
+        """
+        room_ids = [room.pk for room in rooms]
+
+        # 각 방별 안읽은 메시지 수 집계
+        unread_counts = (
+            Message.objects.filter(room_id__in=room_ids)
+            .exclude(sender=user)
+            .exclude(reads__user=user)
+            .values("room_id")
+            .annotate(count=Count("pk"))
+        )
+
+        return {item["room_id"]: item["count"] for item in unread_counts}
+
+
+class MessageRead(models.Model):
+    """메시지 읽음 기록 모델."""
+
+    message = models.ForeignKey(
+        Message,
+        on_delete=models.CASCADE,
+        verbose_name="메시지",
+        related_name="reads",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        verbose_name="사용자",
+        related_name="read_messages",
+    )
+    read_at = models.DateTimeField("읽은 시간", auto_now_add=True)
+
+    objects: MessageReadManager = MessageReadManager()
+
+    class Meta:
+        verbose_name = "메시지 읽음 기록"
+        verbose_name_plural = "메시지 읽음 기록"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["message", "user"],
+                name="unique_message_read",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["message", "user"]),
+            models.Index(fields=["user", "read_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} - {self.message_id}"

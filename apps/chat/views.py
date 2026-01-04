@@ -10,7 +10,7 @@ from django.views.generic import DetailView, ListView, View
 
 import structlog
 
-from apps.chat.models import Room
+from apps.chat.models import MessageRead, Room
 from apps.users.models import User
 
 logger = structlog.get_logger(__name__)
@@ -35,6 +35,16 @@ class RoomListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         context["today"] = date.today()
         context["selected_room"] = None
+
+        # 채팅방별 안읽은 메시지 수
+        rooms = context.get("rooms", [])
+        if rooms:
+            context["unread_counts"] = MessageRead.objects.get_unread_counts_for_rooms(
+                rooms, self.request.user
+            )
+        else:
+            context["unread_counts"] = {}
+
         return context
 
 
@@ -66,8 +76,14 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
         user = self.request.user
 
         # 채팅방 목록 추가
-        context["rooms"] = Room.objects.get_by_user(user).with_latest_message()
+        rooms = Room.objects.get_by_user(user).with_latest_message()
+        context["rooms"] = rooms
         context["today"] = date.today()
+
+        # 채팅방별 안읽은 메시지 수
+        context["unread_counts"] = MessageRead.objects.get_unread_counts_for_rooms(
+            rooms, user
+        )
 
         # 1:1 대화인 경우 상대방 정보 (prefetch된 participants에서 조회)
         if room.is_direct:
@@ -76,6 +92,9 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
             context["display_name"] = other_user.name if other_user else "알 수 없음"
         else:
             context["display_name"] = room.name
+
+        # 참여자 수 (프론트엔드에서 unread_count 초기값 계산용)
+        context["participant_count"] = room.participants.count()
 
         return context
 
