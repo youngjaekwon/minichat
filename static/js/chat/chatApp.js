@@ -2,7 +2,7 @@
  * 채팅 애플리케이션 메인 컴포넌트
  */
 
-import { formatTime } from './modules/dateUtils.js';
+import { formatTime, formatRoomTime } from './modules/dateUtils.js';
 import { createWebSocketManager } from './modules/websocket.js';
 import { createMessageManager } from './modules/messages.js';
 import { createSearchManager } from './modules/search.js';
@@ -22,6 +22,10 @@ export default function chatApp(roomId, userId, userName) {
         userId: userId,
         userName: userName,
         maxMessageLength: 10000,
+
+        // 채팅방 목록 상태
+        rooms: [],
+        isLoadingRooms: true,
 
         // 사이드바 상태 (모바일용)
         sidebarOpen: false,
@@ -78,6 +82,9 @@ export default function chatApp(roomId, userId, userName) {
          * 컴포넌트 초기화
          */
         async init() {
+            // 채팅방 목록 로드
+            await this.loadRooms();
+
             // 모바일에서 대화가 선택되지 않았을 때 사이드바 자동 표시
             if (!this.roomId) {
                 if (window.innerWidth < 768) {
@@ -125,6 +132,29 @@ export default function chatApp(roomId, userId, userName) {
          */
         closeSidebar() {
             this.sidebarOpen = false;
+        },
+
+        /**
+         * 채팅방 목록 로드
+         */
+        async loadRooms() {
+            this.isLoadingRooms = true;
+
+            try {
+                const response = await fetch('/chat/api/rooms/');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                this.rooms = data.rooms || [];
+            } catch (error) {
+                console.error('Failed to load rooms:', error);
+                this.showError('대화 목록을 불러오는데 실패했습니다.');
+            } finally {
+                this.isLoadingRooms = false;
+            }
         },
 
         // ==================== 연결 ====================
@@ -209,6 +239,16 @@ export default function chatApp(roomId, userId, userName) {
          */
         formatTime(isoString) {
             return formatTime(isoString);
+        },
+
+        /**
+         * 채팅방 목록용 시간 포맷팅
+         * @param {string} isoString - ISO 8601 형식의 날짜 문자열
+         * @param {boolean} isToday - 오늘 날짜 여부
+         * @returns {string} 포맷팅된 시간 또는 날짜 문자열
+         */
+        formatRoomTime(isoString, isToday) {
+            return formatRoomTime(isoString, isToday);
         },
 
         /**

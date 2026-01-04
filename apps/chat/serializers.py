@@ -1,9 +1,10 @@
 from django.db import models
+from django.utils.timezone import localdate
 
 from rest_framework import serializers
 
 from apps.chat.constants import MESSAGES_PER_PAGE
-from apps.chat.models import Message
+from apps.chat.models import Message, Room
 
 
 class MessageDirection(models.TextChoices):
@@ -60,3 +61,33 @@ class MessageSearchParamsSerializer(serializers.Serializer):
     """
 
     q = serializers.CharField(min_length=2, max_length=100)
+
+
+class RoomSerializer(serializers.ModelSerializer):
+    """채팅방 목록 직렬화.
+
+    context에 'user'가 필요함.
+    """
+
+    display_name = serializers.SerializerMethodField()
+    last_message_preview = serializers.SerializerMethodField()
+    is_today = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Room
+        fields = ["id", "display_name", "last_message_preview", "updated_at", "is_today"]
+        read_only_fields = fields
+
+    def get_display_name(self, obj: Room) -> str:
+        """사용자 기준 대화방 표시 이름."""
+        user = self.context.get("user")
+        return obj.get_display_name(user) if user else str(obj)
+
+    def get_last_message_preview(self, obj: Room) -> str | None:
+        """마지막 메시지 미리보기."""
+        last_msg = obj.get_last_message()
+        return last_msg.get_preview() if last_msg else None
+
+    def get_is_today(self, obj: Room) -> bool:
+        """오늘 업데이트 여부."""
+        return obj.updated_at.date() == localdate()

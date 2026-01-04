@@ -12,6 +12,7 @@ from apps.chat.serializers import (
     MessageListParamsSerializer,
     MessageSearchParamsSerializer,
     MessageSerializer,
+    RoomSerializer,
 )
 
 logger = structlog.get_logger(__name__)
@@ -239,3 +240,37 @@ class MessageSearchAPIView(APIView):
                 "total": len(message_ids),
             }
         )
+
+
+class RoomListAPIView(APIView):
+    """채팅방 목록 API.
+
+    사용자가 참여 중인 채팅방 목록을 반환한다.
+
+    GET /chat/api/rooms/
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        """채팅방 목록을 조회한다."""
+        rooms = (
+            Room.objects.get_by_user(request.user)
+            .prefetch_related("participants")
+            .with_latest_message()
+        )
+
+        serializer = RoomSerializer(
+            rooms,
+            many=True,
+            context={"user": request.user},
+        )
+        data = serializer.data
+
+        logger.info(
+            "rooms_loaded",
+            user_id=request.user.pk,
+            count=len(data),
+        )
+
+        return Response({"rooms": data})

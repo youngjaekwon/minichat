@@ -1,4 +1,3 @@
-from datetime import date
 from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -33,7 +32,6 @@ class RoomListView(LoginRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        context["today"] = date.today()
         context["selected_room"] = None
         return context
 
@@ -64,10 +62,6 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         room = self.object
         user = self.request.user
-
-        # 채팅방 목록 추가
-        context["rooms"] = Room.objects.get_by_user(user).with_latest_message()
-        context["today"] = date.today()
 
         # 1:1 대화인 경우 상대방 정보 (prefetch된 participants에서 조회)
         if room.is_direct:

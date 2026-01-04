@@ -54,17 +54,28 @@
                 </span>
                 <input type="text"
                        placeholder="대화 검색하기"
-                       class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                       disabled
+                       class="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-gray-50 cursor-not-allowed">
             </div>
         </div>
 
         <!-- 채팅방 목록 -->
         <div class="flex-1 overflow-y-auto">
-            {% if rooms %}
-                {% for room in rooms %}
-                <a href="{% url 'chat:room_detail' room.pk %}"
+            <!-- 채팅방 목록 로딩 중 -->
+            <div x-show="isLoadingRooms" class="flex items-center justify-center py-12">
+                <svg class="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="ml-2 text-sm text-gray-500">대화 목록 불러오는 중...</span>
+            </div>
+
+            <!-- 채팅방 목록 (Alpine.js 동적 렌더링) -->
+            <template x-for="room in rooms" :key="room.id">
+                <a :href="`/chat/${room.id}/`"
                    @click="closeSidebar()"
-                   class="block hover:bg-gray-50 transition {% if selected_room and selected_room.pk == room.pk %}bg-gray-50 border-l-4 border-blue-500{% else %}border-l-4 border-transparent{% endif %}">
+                   class="block hover:bg-gray-50 transition border-l-4"
+                   :class="roomId === room.id ? 'bg-gray-50 border-blue-500' : 'border-transparent'">
                     <div class="px-4 py-3 flex items-start">
                         <!-- 프로필 이미지 -->
                         <div class="w-10 h-10 bg-gray-300 rounded-full flex-shrink-0 flex items-center justify-center">
@@ -75,40 +86,27 @@
                         <!-- 대화 정보 -->
                         <div class="ml-3 flex-1 min-w-0">
                             <div class="flex justify-between items-center">
-                                <h3 class="font-medium text-gray-800 truncate text-sm">
-                                    {{ room|display_name:request.user }}
-                                </h3>
-                                <span class="text-xs text-gray-400 flex-shrink-0 ml-2">
-                                    {% if room.updated_at.date == today %}
-                                        {{ room.updated_at|korean_time }}
-                                    {% else %}
-                                        {{ room.updated_at|date:"Y.m.d" }}
-                                    {% endif %}
-                                </span>
+                                <h3 class="font-medium text-gray-800 truncate text-sm"
+                                    x-text="room.display_name"></h3>
+                                <span class="text-xs text-gray-400 flex-shrink-0 ml-2"
+                                      x-text="formatRoomTime(room.updated_at, room.is_today)"></span>
                             </div>
-                            {% with last_message=room.get_last_message %}
-                                {% if last_message %}
-                                <p class="text-gray-500 text-sm truncate mt-1">
-                                    {{ last_message.get_preview }}
-                                </p>
-                                {% else %}
-                                <p class="text-gray-400 text-sm mt-1">
-                                    아직 메시지가 없습니다
-                                </p>
-                                {% endif %}
-                            {% endwith %}
+                            <p class="text-sm truncate mt-1"
+                               :class="room.last_message_preview ? 'text-gray-500' : 'text-gray-400'"
+                               x-text="room.last_message_preview || '아직 메시지가 없습니다'"></p>
                         </div>
                     </div>
                 </a>
-                {% endfor %}
-            {% else %}
-                <div class="px-4 py-12 text-center text-gray-500">
-                    <p class="mb-4">참여 중인 대화가 없습니다.</p>
-                    <a href="{% url 'chat:new_conversation' %}" class="text-blue-500 hover:underline">
-                        새 대화를 시작해보세요
-                    </a>
-                </div>
-            {% endif %}
+            </template>
+
+            <!-- 대화 없음 상태 -->
+            <div x-show="!isLoadingRooms && rooms.length === 0"
+                 class="px-4 py-12 text-center text-gray-500">
+                <p class="mb-4">참여 중인 대화가 없습니다.</p>
+                <a href="{% url 'chat:new_conversation' %}" class="text-blue-500 hover:underline">
+                    새 대화를 시작해보세요
+                </a>
+            </div>
         </div>
 
     </div>
