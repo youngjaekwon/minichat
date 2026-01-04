@@ -396,7 +396,31 @@ export function createMessageManager(app) {
                 app.$nextTick(() => {
                     app.scrollManager.scrollToBottom();
                 });
+
+                // 다른 사용자의 메시지이고, 스크롤이 하단 근처인 경우 즉시 읽음 처리 요청
+                if (message.sender_id !== app.userId) {
+                    this.sendMarkAsRead([message.id]);
+                }
             }
+        },
+
+        /**
+         * 메시지 읽음 처리 요청 전송
+         * @param {Array<number>} messageIds - 읽음 처리할 메시지 ID 배열
+         */
+        sendMarkAsRead(messageIds) {
+            if (
+                !messageIds ||
+                messageIds.length === 0 ||
+                app.connectionState !== 'connected'
+            ) {
+                return;
+            }
+
+            app.wsManager.send({
+                type: 'mark_as_read',
+                message_ids: messageIds,
+            });
         },
 
         /**

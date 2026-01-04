@@ -525,3 +525,118 @@ class TestChatConsumerSidebarOnlyConnect:
 
         await sidebar_communicator.disconnect()
         await room_communicator.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+class TestChatConsumerMarkAsRead:
+    """ChatConsumer mark_as_read 기능 테스트."""
+
+    async def test_mark_as_read_broadcasts_read_status(self, user, other_user, room):
+        """mark_as_read 메시지를 보내면 read_status가 브로드캐스트된다."""
+        import asyncio
+
+        # other_user가 채팅방에 연결
+        other_communicator = await create_communicator(other_user, room.pk)
+        other_connected, _ = await other_communicator.connect()
+        assert other_connected is True
+
+        # user가 채팅방에 연결
+        user_communicator = await create_communicator(user, room.pk)
+        user_connected, _ = await user_communicator.connect()
+        assert user_connected is True
+
+        # other_user가 새 메시지 전송
+        await other_communicator.send_json_to({
+            "type": "chat_message",
+            "content": "새로운 메시지",
+        })
+
+        # other_user가 chat_message 수신
+        chat_response = await other_communicator.receive_json_from()
+        assert chat_response["type"] == "chat_message"
+        new_message_id = chat_response["message"]["id"]
+
+        # user도 chat_message 수신
+        user_chat_response = await user_communicator.receive_json_from()
+        assert user_chat_response["type"] == "chat_message"
+
+        # user가 mark_as_read 전송
+        await user_communicator.send_json_to({
+            "type": "mark_as_read",
+            "message_ids": [new_message_id],
+        })
+
+        # other_user가 read_status 수신
+        responses = []
+        for _ in range(3):
+            try:
+                response = await asyncio.wait_for(
+                    other_communicator.receive_json_from(),
+                    timeout=0.5
+                )
+                responses.append(response)
+            except asyncio.TimeoutError:
+                break
+
+        read_status = [r for r in responses if r.get("type") == "read_status"]
+        assert len(read_status) >= 1
+        assert new_message_id in read_status[0]["message_ids"]
+        assert read_status[0]["reader_id"] == user.pk
+
+        await user_communicator.disconnect()
+        await other_communicator.disconnect()
+
+    async def test_mark_as_read_saves_to_db(self, user, other_user, room):
+        """mark_as_read 메시지를 보내면 DB에 읽음 상태가 저장된다."""
+        # other_user가 보낸 메시지 생성
+        @database_sync_to_async
+        def create_message():
+            return MessageFactory(room=room, sender=other_user, content="DB 저장 테스트")
+
+        message = await create_message()
+
+        # user가 채팅방에 연결 (연결 시 자동 읽음 처리가 일어남)
+        communicator = await create_communicator(user, room.pk)
+        connected, _ = await communicator.connect()
+        assert connected is True
+
+        # 연결 시 자동 전송된 read_status 수신
+        _ = await communicator.receive_json_from()
+
+        # DB에서 읽음 상태 확인
+        @database_sync_to_async
+        def check_read_status():
+            return MessageRead.objects.filter(message=message, user=user).exists()
+
+        assert await check_read_status() is True
+
+        await communicator.disconnect()
+
+    async def test_mark_as_read_empty_message_ids_ignored(self, user, room):
+        """빈 message_ids로 mark_as_read를 보내면 무시된다."""
+        import asyncio
+
+        communicator = await create_communicator(user, room.pk)
+        connected, _ = await communicator.connect()
+        assert connected is True
+
+        # 빈 message_ids로 mark_as_read 전송
+        await communicator.send_json_to({
+            "type": "mark_as_read",
+            "message_ids": [],
+        })
+
+        # 응답이 없어야 함
+        try:
+            await asyncio.wait_for(
+                communicator.receive_json_from(),
+                timeout=0.5
+            )
+            # 응답이 오면 read_status가 아니어야 함
+            assert False, "빈 message_ids에 대해 응답이 오면 안 됨"
+        except asyncio.TimeoutError:
+            # 타임아웃은 예상된 동작
+            pass
+
+        await communicator.disconnect()

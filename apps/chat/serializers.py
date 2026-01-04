@@ -4,7 +4,7 @@ from django.utils.timezone import localdate
 from rest_framework import serializers
 
 from apps.chat.constants import MESSAGES_PER_PAGE, ROOMS_PER_PAGE
-from apps.chat.models import Message, Room
+from apps.chat.models import Message, MessageRead, Room
 
 
 class MessageDirection(models.TextChoices):
@@ -81,10 +81,18 @@ class RoomSerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField()
     last_message_preview = serializers.SerializerMethodField()
     is_today = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Room
-        fields = ["id", "display_name", "last_message_preview", "updated_at", "is_today"]
+        fields = [
+            "id",
+            "display_name",
+            "last_message_preview",
+            "updated_at",
+            "is_today",
+            "unread_count",
+        ]
         read_only_fields = fields
 
     def get_display_name(self, obj: Room) -> str:
@@ -100,6 +108,13 @@ class RoomSerializer(serializers.ModelSerializer):
     def get_is_today(self, obj: Room) -> bool:
         """오늘 업데이트 여부."""
         return obj.updated_at.date() == localdate()
+
+    def get_unread_count(self, obj: Room) -> int:
+        """안읽은 메시지 수."""
+        user = self.context.get("user")
+        if not user:
+            return 0
+        return MessageRead.objects.get_unread_count(obj, user)
 
 
 class RoomListParamsSerializer(serializers.Serializer):

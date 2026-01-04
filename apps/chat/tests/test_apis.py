@@ -539,6 +539,64 @@ class TestRoomListAPIPagination:
         assert len(response.data["rooms"]) == 1
         assert response.data["rooms"][0]["id"] == room.pk
 
+    def test_returns_unread_count(self, api_client):
+        """대화방 목록에 안읽은 메시지 수가 포함된다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        room = RoomFactory(created_by=user, participants=[other_user])
+
+        # other_user가 보낸 메시지 3개 (user 기준 안읽음)
+        MessageFactory(room=room, sender=other_user, content="메시지1")
+        MessageFactory(room=room, sender=other_user, content="메시지2")
+        MessageFactory(room=room, sender=other_user, content="메시지3")
+
+        api_client.force_authenticate(user=user)
+        url = reverse("chat:api_rooms")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data["rooms"]) == 1
+        assert "unread_count" in response.data["rooms"][0]
+        assert response.data["rooms"][0]["unread_count"] == 3
+
+    def test_unread_count_excludes_own_messages(self, api_client):
+        """자신이 보낸 메시지는 안읽은 수에 포함되지 않는다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        room = RoomFactory(created_by=user, participants=[other_user])
+
+        # user가 보낸 메시지 (안읽은 수에 포함 안됨)
+        MessageFactory(room=room, sender=user, content="내 메시지")
+        # other_user가 보낸 메시지 (안읽은 수에 포함)
+        MessageFactory(room=room, sender=other_user, content="상대방 메시지")
+
+        api_client.force_authenticate(user=user)
+        url = reverse("chat:api_rooms")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["rooms"][0]["unread_count"] == 1
+
+    def test_unread_count_excludes_read_messages(self, api_client):
+        """읽은 메시지는 안읽은 수에 포함되지 않는다."""
+        user = UserFactory()
+        other_user = UserFactory()
+        room = RoomFactory(created_by=user, participants=[other_user])
+
+        msg1 = MessageFactory(room=room, sender=other_user, content="메시지1")
+        MessageFactory(room=room, sender=other_user, content="메시지2")
+
+        # msg1만 읽음 처리
+        MessageReadFactory(message=msg1, user=user)
+
+        api_client.force_authenticate(user=user)
+        url = reverse("chat:api_rooms")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        # 1개 읽음, 1개 안읽음
+        assert response.data["rooms"][0]["unread_count"] == 1
+
 
 @pytest.mark.django_db
 class TestRoomSearchAPIPagination:

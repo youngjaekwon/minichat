@@ -120,6 +120,9 @@ export default function chatApp(roomId, userId, userName, participantCount) {
                 return;
             }
 
+            // 현재 보고 있는 채팅방의 unread_count를 0으로 설정
+            this.clearCurrentRoomUnreadCount();
+
             // 매니저 초기화
             this.wsManager = createWebSocketManager(this);
             this.messageManager = createMessageManager(this);
@@ -416,90 +419,49 @@ export default function chatApp(roomId, userId, userName, participantCount) {
         // ==================== 사이드바 업데이트 ====================
 
         /**
+         * 현재 보고 있는 채팅방의 unread_count를 0으로 설정
+         */
+        clearCurrentRoomUnreadCount() {
+            if (!this.roomId) return;
+
+            const currentRoom = this.rooms.find((r) => r.id === this.roomId);
+            if (currentRoom) {
+                currentRoom.unread_count = 0;
+            }
+        },
+
+        /**
          * 사이드바 업데이트 처리
          * @param {Object} room - 채팅방 정보 (room_id, last_message, last_message_time, unread_count)
          */
         handleSidebarUpdate(room) {
-            // 사이드바 채팅방 정보 업데이트
+            // rooms 배열에서 해당 room 찾아서 업데이트
+            const existingRoom = this.rooms.find((r) => r.id === room.room_id);
+            if (existingRoom) {
+                // 현재 보고 있는 방이 아닌 경우에만 unread_count 업데이트
+                if (room.room_id !== this.roomId) {
+                    existingRoom.unread_count = room.unread_count;
+                }
+                existingRoom.last_message_preview = room.last_message;
+                existingRoom.updated_at = room.last_message_time;
+                existingRoom.is_today = true; // 새 메시지가 오면 오늘
+
+                // 채팅방을 맨 위로 이동 (검색 모드가 아닐 때)
+                if (!this.isSidebarSearchMode) {
+                    const index = this.rooms.indexOf(existingRoom);
+                    if (index > 0) {
+                        this.rooms.splice(index, 1);
+                        this.rooms.unshift(existingRoom);
+                    }
+                }
+            }
+
+            // sidebarRooms에도 저장 (추후 사용 가능)
             this.sidebarRooms[room.room_id] = {
                 lastMessage: room.last_message,
                 lastMessageTime: room.last_message_time,
                 unreadCount: room.unread_count,
             };
-
-            // DOM 직접 업데이트 (Alpine.js 반응성 외부)
-            this.updateSidebarDOM(room);
-        },
-
-        /**
-         * 사이드바 DOM 업데이트
-         * @param {Object} room - 채팅방 정보
-         */
-        updateSidebarDOM(room) {
-            const roomElement = document.querySelector(
-                `[data-room-id="${room.room_id}"]`
-            );
-            if (!roomElement) return;
-
-            // 마지막 메시지 업데이트
-            if (room.last_message) {
-                const msgElement = roomElement.querySelector('.last-message');
-                if (msgElement) {
-                    msgElement.textContent = room.last_message;
-                }
-            }
-
-            // 시간 업데이트
-            if (room.last_message_time) {
-                const timeElement = roomElement.querySelector('.last-message-time');
-                if (timeElement) {
-                    timeElement.textContent = formatTime(room.last_message_time);
-                }
-            }
-
-            // 안읽은 메시지 배지 업데이트
-            const badgeElement = roomElement.querySelector('.unread-badge');
-            if (badgeElement) {
-                if (room.unread_count > 0) {
-                    badgeElement.textContent = room.unread_count > 99 ? '99+' : room.unread_count;
-                    badgeElement.classList.remove('hidden');
-                } else {
-                    badgeElement.classList.add('hidden');
-                }
-            }
-
-            // 현재 선택된 채팅방이면 unread_count를 0으로 처리
-            if (room.room_id === this.roomId && room.unread_count > 0) {
-                // 이미 해당 방에 있으므로 배지는 숨김
-                if (badgeElement) {
-                    badgeElement.classList.add('hidden');
-                }
-            }
-
-            // 채팅방 순서 변경 (새 메시지가 있는 방을 최상단으로)
-            this.moveRoomToTop(roomElement);
-        },
-
-        /**
-         * 채팅방을 목록 최상단으로 이동
-         * @param {HTMLElement} roomElement - 이동할 채팅방 요소
-         */
-        moveRoomToTop(roomElement) {
-            // 사이드바 검색 중이면 순서 변경 안 함
-            const searchInput = document.getElementById('sidebar-search-input');
-            if (searchInput && searchInput.value.trim()) {
-                return;
-            }
-
-            const roomList = roomElement.parentElement;
-            if (!roomList) return;
-
-            // 이미 첫 번째 요소인 경우 이동 불필요
-            const firstRoom = roomList.firstElementChild;
-            if (firstRoom === roomElement) return;
-
-            // 요소를 최상단으로 이동
-            roomList.insertBefore(roomElement, firstRoom);
         },
 
         // ==================== 유틸리티 ====================

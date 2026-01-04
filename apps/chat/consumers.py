@@ -21,6 +21,7 @@ from apps.chat.messages import (
     ChatSendMessage,
     ErrorMessage,
     IncomingMessageAdapter,
+    MarkAsReadMessage,
     MessageAckMessage,
     MessagePayload,
     ReadStatusMessage,
@@ -197,7 +198,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        await self._handle_chat_message(message)
+        # 메시지 타입에 따라 분기 처리
+        if isinstance(message, ChatSendMessage):
+            await self._handle_chat_message(message)
+        elif isinstance(message, MarkAsReadMessage):
+            await self._handle_mark_as_read(message)
 
     async def _handle_chat_message(self, msg: ChatSendMessage) -> None:
         """채팅 메시지 처리."""
@@ -264,6 +269,40 @@ class ChatConsumer(AsyncWebsocketConsumer):
             participant_ids=participant_ids,
             last_message_content=preview,
             last_message_time=message.created_at.isoformat(),
+        )
+
+    async def _handle_mark_as_read(self, msg: MarkAsReadMessage) -> None:
+        """메시지 읽음 처리 요청 핸들러.
+
+        클라이언트가 메시지를 읽었음을 서버에 알림.
+        해당 메시지의 발신자에게 읽음 상태를 브로드캐스트.
+        """
+        if not msg.message_ids:
+            return
+
+        logger.info(
+            "mark_as_read_received",
+            room_id=self.room_id,
+            user_id=self.user.pk,
+            message_ids=msg.message_ids,
+        )
+
+        # 채팅방 그룹에 읽음 상태 브로드캐스트 (실시간 반영)
+        read_status_msg = ReadStatusMessage(
+            room_id=self.room_id,
+            message_ids=msg.message_ids,
+            reader_id=self.user.pk,
+        )
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            read_status_msg.model_dump(),
+        )
+
+        # Celery task로 DB에 읽음 상태 저장 (비동기)
+        await self._save_read_status(
+            room_id=self.room_id,
+            user_id=self.user.pk,
+            message_ids=msg.message_ids,
         )
 
     async def chat_message(self, event: dict[str, Any]) -> None:

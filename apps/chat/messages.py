@@ -16,8 +16,16 @@ class ChatSendMessage(BaseModel):
     client_id: str | None = None
 
 
-# TypeAdapter for parsing incoming messages
-IncomingMessageAdapter: TypeAdapter[ChatSendMessage] = TypeAdapter(ChatSendMessage)
+class MarkAsReadMessage(BaseModel):
+    """메시지 읽음 처리 요청."""
+
+    type: Literal[MessageType.MARK_AS_READ] = MessageType.MARK_AS_READ
+    message_ids: list[int]
+
+
+# TypeAdapter for parsing incoming messages (Union of all incoming types)
+IncomingMessage = ChatSendMessage | MarkAsReadMessage
+IncomingMessageAdapter: TypeAdapter[IncomingMessage] = TypeAdapter(IncomingMessage)
 
 
 class MessagePayload(BaseModel):

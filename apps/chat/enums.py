@@ -9,6 +9,7 @@ class MessageType(StrEnum):
     ERROR = "error"
     READ_STATUS = "read_status"
     SIDEBAR_UPDATE = "sidebar_update"
+    MARK_AS_READ = "mark_as_read"
 
 
 class AckStatus(StrEnum):
