@@ -14,15 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 의존성 설치 (캐싱 최적화)
+# 의존성 설치
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv,id=uv-cache \
-    uv sync --frozen --no-install-project --group prod
+RUN uv sync --frozen --no-install-project --group prod
 
 # 프로젝트 복사 및 설치
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv,id=uv-cache \
-    uv sync --frozen --group prod
+RUN uv sync --frozen --group prod
 
 # 정적 파일 수집
 RUN uv run python manage.py collectstatic --noinput
