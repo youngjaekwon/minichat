@@ -61,29 +61,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    command: uv run python manage.py runserver 0.0.0.0:8000
-
-  daphne:
-    build:
-      context: .
-      dockerfile: Dockerfile.dev
-    container_name: minichat-daphne
-    volumes:
-      - .:/app
-      - /app/.venv
-    ports:
-      - "8001:8001"
-    environment:
-      - DJANGO_SETTINGS_MODULE=config.settings.dev
-      - DJANGO_ENV_FILE=env.dev
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    command: uv run daphne -b 0.0.0.0 -p 8001 config.asgi:application
+    command: uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
 
   celery:
     build:
