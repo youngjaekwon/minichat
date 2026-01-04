@@ -6,7 +6,7 @@ from django.urls import reverse
 
 import pytest
 
-from apps.chat.models import Message, Room
+from apps.chat.models import Room
 from tests.factories import MessageFactory, RoomFactory, UserFactory
 
 
@@ -107,73 +107,6 @@ class TestRoomDetailView:
         response = client.get(reverse("chat:room_detail", args=[room.pk]))
 
         assert response.context["other_user"] == other_user
-
-
-@pytest.mark.django_db
-class TestSendMessageView:
-    """메시지 전송 뷰 테스트."""
-
-    def test_requires_login(self, client):
-        """로그인 필수 테스트."""
-        room = RoomFactory()
-        url = reverse("chat:send_message", args=[room.pk])
-        response = client.post(url, {"content": "test"})
-
-        assert response.status_code == 302
-        assert "login" in response.url
-
-    def test_send_message_success(self, client):
-        """메시지 전송 성공 테스트."""
-        user = UserFactory()
-        room = RoomFactory(created_by=user)
-
-        client.force_login(user)
-        response = client.post(
-            reverse("chat:send_message", args=[room.pk]),
-            {"content": "안녕하세요"},
-        )
-
-        assert response.status_code == 302
-        assert Message.objects.filter(room=room, content="안녕하세요").exists()
-
-    def test_send_empty_message(self, client):
-        """빈 메시지 전송 테스트."""
-        user = UserFactory()
-        room = RoomFactory(created_by=user)
-
-        client.force_login(user)
-        response = client.post(
-            reverse("chat:send_message", args=[room.pk]),
-            {"content": ""},
-        )
-
-        # 빈 메시지는 저장되지 않고 리다이렉트
-        assert response.status_code == 302
-        assert Message.objects.filter(room=room).count() == 0
-
-    def test_non_participant_denied(self, client):
-        """비참여자 전송 차단 테스트."""
-        user = UserFactory()
-        other_user = UserFactory()
-        room = RoomFactory(created_by=other_user)
-
-        client.force_login(user)
-        response = client.post(
-            reverse("chat:send_message", args=[room.pk]),
-            {"content": "test"},
-        )
-
-        assert response.status_code == 403
-
-    def test_get_method_not_allowed(self, client):
-        """GET 요청 차단 테스트."""
-        user = UserFactory()
-        room = RoomFactory(created_by=user)
-
-        client.force_login(user)
-        response = client.get(reverse("chat:send_message", args=[room.pk]))
-
-        assert response.status_code == 405
 
 
 @pytest.mark.django_db

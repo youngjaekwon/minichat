@@ -6,7 +6,11 @@ from django.db.models import OuterRef, Prefetch, QuerySet, Subquery
 from django.db.models.signals import m2m_changed
 from django.dispatch import receiver
 
+import structlog
+
 from apps.users.models import User
+
+logger = structlog.get_logger(__name__)
 
 
 class RoomQuerySet(QuerySet["Room"]):
@@ -84,9 +88,22 @@ class RoomManager(models.Manager["Room"]):
                 )
                 room.save(using=self._db)
                 room.participants.add(user1, user2)
+                logger.info(
+                    "direct_room_created",
+                    room_id=room.pk,
+                    user1_id=user1.pk,
+                    user2_id=user2.pk,
+                )
                 return room
         except IntegrityError:
             # 3. 동시 생성 시 기존 방 반환
+            logger.warning(
+                "direct_room_creation_conflict",
+                reason="integrity_error",
+                user1_id=user1.pk,
+                user2_id=user2.pk,
+                direct_chat_key=key,
+            )
             return self.get(direct_chat_key=key)
 
     def create_group(
@@ -110,6 +127,13 @@ class RoomManager(models.Manager["Room"]):
         )
         room.save(using=self._db)
         room.participants.add(created_by, *participants)
+        logger.info(
+            "group_room_created",
+            room_id=room.pk,
+            room_name=name,
+            created_by_id=created_by.pk,
+            participant_count=len(participants) + 1,
+        )
         return room
 
 

@@ -64,26 +64,6 @@
 - **WHEN** 잘못된 JSON 형식으로 메시지를 전송하면
 - **THEN** 에러 응답이 전송되어야 한다 (code: INVALID_FORMAT)
 
-### Requirement: Rate Limiting
-
-시스템은 메시지 전송에 대한 Rate Limiting을 적용해야 한다(SHALL).
-
-- 사용자별 분당 최대 60개 메시지
-- 사용자별 초당 최대 5개 메시지
-- Redis 기반 sliding window counter 사용
-
-#### Scenario: Rate Limit 초과
-
-- **WHEN** 사용자가 분당 60개를 초과하는 메시지를 전송하면
-- **THEN** 이후 메시지는 거부되어야 한다
-- **AND** 에러 응답이 전송되어야 한다 (code: RATE_LIMITED)
-- **AND** 재시도 가능 시간이 응답에 포함되어야 한다
-
-#### Scenario: Rate Limit 내 전송
-
-- **WHEN** 사용자가 제한 내에서 메시지를 전송하면
-- **THEN** 메시지가 정상적으로 처리되어야 한다
-
 ### Requirement: Realtime Message Receive
 
 시스템은 WebSocket을 통해 실시간 메시지 수신 기능을 제공해야 한다(SHALL).
@@ -116,23 +96,6 @@
 - **WHEN** last_message_id 없이 WebSocket 연결이 수립되면
 - **THEN** 과거 메시지를 전송하지 않아야 한다
 - **AND** 이후 수신되는 메시지만 전달해야 한다
-
-### Requirement: Heartbeat
-
-시스템은 WebSocket 연결 상태를 주기적으로 확인해야 한다(SHALL).
-
-- 서버에서 30초마다 ping 전송
-- 클라이언트가 10초 내 pong 미응답 시 연결 종료
-
-#### Scenario: 정상 Heartbeat
-
-- **WHEN** 서버가 ping을 전송하고 클라이언트가 pong으로 응답하면
-- **THEN** 연결이 유지되어야 한다
-
-#### Scenario: Heartbeat 타임아웃
-
-- **WHEN** 클라이언트가 10초 내에 pong 응답을 하지 않으면
-- **THEN** 서버가 연결을 종료해야 한다
 
 ### Requirement: Frontend WebSocket Integration
 

@@ -6,7 +6,11 @@
 {% block body_class %}h-full overflow-hidden{% endblock %}
 
 {% block content %}
-<div class="h-screen flex bg-white">
+<div class="h-screen flex bg-white"
+     x-data="chatApp({{ selected_room.pk|default:'null' }}, {{ request.user.pk }}, '{{ request.user.name|escapejs }}')"
+     x-init="init()"
+     @beforeunload.window="disconnect()"
+     >
     <!-- 왼쪽 사이드바: 채팅방 목록 -->
     <div class="w-80 border-r border-gray-200 flex flex-col">
         <!-- 헤더 -->
@@ -100,12 +104,26 @@
         </div>
 
         <!-- 메시지 목록 -->
-        <div class="flex-1 overflow-y-auto bg-gray-50 p-4">
+        <div class="flex-1 overflow-y-auto bg-gray-50 p-4" id="messages-container" x-ref="messagesContainer">
+            <!-- 연결 상태 표시 -->
+            <div x-show="connectionState !== 'connected'" class="flex items-center justify-center py-2 mb-4">
+                <template x-if="connectionState === 'connecting'">
+                    <span class="text-sm text-yellow-600 bg-yellow-100 px-3 py-1 rounded-full">연결 중...</span>
+                </template>
+                <template x-if="connectionState === 'reconnecting'">
+                    <span class="text-sm text-orange-600 bg-orange-100 px-3 py-1 rounded-full">재연결 중... (시도 <span x-text="reconnectAttempts"></span>/10)</span>
+                </template>
+                <template x-if="connectionState === 'disconnected'">
+                    <span class="text-sm text-red-600 bg-red-100 px-3 py-1 rounded-full">연결 끊김</span>
+                </template>
+            </div>
+
+            <!-- 초기 메시지 (SSR) -->
             {% if chat_messages %}
                 {% regroup chat_messages by created_at.date as messages_by_date %}
                 {% for date_group in messages_by_date %}
                     <!-- 날짜 구분선 -->
-                    <div class="flex items-center justify-center my-6">
+                    <div class="flex items-center justify-center my-6 date-separator" data-date="{{ date_group.grouper|date:'Y-m-d' }}">
                         <div class="border-t border-gray-300 flex-grow"></div>
                         <span class="px-4 text-xs text-gray-500">{{ date_group.grouper|date:"Y. m. d" }}</span>
                         <div class="border-t border-gray-300 flex-grow"></div>
@@ -114,7 +132,7 @@
                     {% for message in date_group.list %}
                         {% if message.sender_id == request.user.pk %}
                         <!-- 내 메시지 (오른쪽) -->
-                        <div class="flex justify-end mb-4">
+                        <div class="flex justify-end mb-4 message-item" data-message-id="{{ message.pk }}">
                             <div class="max-w-md">
                                 <div class="bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200">
                                     <p class="text-gray-800 text-sm whitespace-pre-wrap">{{ message.content }}</p>
@@ -126,7 +144,7 @@
                         </div>
                         {% else %}
                         <!-- 상대방 메시지 (왼쪽) -->
-                        <div class="flex justify-start mb-4">
+                        <div class="flex justify-start mb-4 message-item" data-message-id="{{ message.pk }}">
                             <div class="max-w-md">
                                 {% if not selected_room.is_direct %}
                                 <div class="flex items-center mb-1">
@@ -151,27 +169,63 @@
                     {% endfor %}
                 {% endfor %}
             {% else %}
-                <div class="flex items-center justify-center h-full text-gray-500">
+                <div x-show="messages.length === 0" class="flex items-center justify-center h-full text-gray-500">
                     아직 메시지가 없습니다. 첫 메시지를 보내보세요!
                 </div>
             {% endif %}
+
+            <!-- 실시간 추가 메시지 (Alpine.js) -->
+            <template x-for="msg in messages" :key="msg.id || msg.clientId">
+                <div :class="msg.sender_id === userId ? 'flex justify-end mb-4' : 'flex justify-start mb-4'"
+                     :data-message-id="msg.id">
+                    <div class="max-w-md">
+                        <!-- 상대방 메시지 헤더 -->
+                        <template x-if="msg.sender_id !== userId">
+                            <div class="flex items-center mb-1">
+                                <div class="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                                <span class="ml-2 text-sm font-medium text-gray-700" x-text="msg.sender_name"></span>
+                            </div>
+                        </template>
+                        <!-- 메시지 내용 -->
+                        <div :class="msg.sender_id === userId ? 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200' : 'bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200 ml-8'">
+                            <p class="text-gray-800 text-sm whitespace-pre-wrap" x-text="msg.content"></p>
+                        </div>
+                        <!-- 시간 및 상태 -->
+                        <div :class="msg.sender_id === userId ? 'text-xs text-gray-400 text-right mt-1' : 'text-xs text-gray-400 ml-8 mt-1'">
+                            <span x-text="formatTime(msg.created_at)"></span>
+                            <template x-if="msg.sender_id === userId && msg.status === 'sending'">
+                                <span class="ml-1 text-gray-400">전송 중...</span>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- 에러 메시지 표시 -->
+        <div x-show="errorMessage"
+             x-transition
+             class="mx-4 mt-2 px-4 py-2 bg-red-100 border border-red-300 text-red-700 text-sm rounded">
+            <span x-text="errorMessage"></span>
         </div>
 
         <!-- 메시지 입력 -->
         <div class="p-4 border-t border-gray-200 bg-white">
-            <form action="{% url 'chat:send_message' selected_room.pk %}" method="post">
-                {% csrf_token %}
+            <form @submit.prevent="sendMessage()">
                 <div class="border border-gray-300 rounded-lg overflow-hidden">
                     <textarea
-                        name="content"
+                        x-model="messageInput"
                         rows="3"
                         placeholder="내용 작성해 주세요."
                         class="w-full px-4 py-3 focus:outline-none resize-none text-sm"
-                        onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); this.form.submit(); }"
+                        @keydown.enter="if (!$event.shiftKey && !$event.isComposing) { $event.preventDefault(); sendMessage(); }"
+                        :disabled="connectionState !== 'connected'"
+                        :maxlength="maxMessageLength"
                     ></textarea>
                     <div class="flex justify-end px-4 py-2 bg-gray-50 border-t border-gray-200">
                         <button type="submit"
-                                class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded text-sm transition">
+                                class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                :disabled="connectionState !== 'connected' || !messageInput.trim()">
                             보내기
                         </button>
                     </div>
@@ -192,4 +246,262 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+function chatApp(roomId, userId, userName) {
+    return {
+        // 설정
+        roomId: roomId,
+        userId: userId,
+        userName: userName,
+        maxMessageLength: 10000,
+
+        // 상태
+        ws: null,
+        connectionState: 'disconnected', // connecting, connected, reconnecting, disconnected
+        reconnectAttempts: 0,
+        maxReconnectAttempts: 10,
+        reconnectDelay: 1000, // 초기 1초
+        maxReconnectDelay: 30000, // 최대 30초
+
+        // 메시지
+        messageInput: '',
+        messages: [],
+        lastMessageId: null,
+        pendingMessages: {},
+
+        // 에러 표시
+        errorMessage: null,
+        errorTimeout: null,
+
+        init() {
+            if (!this.roomId) return;
+
+            // SSR 렌더링된 메시지에서 마지막 메시지 ID 추출
+            const lastMessage = document.querySelector('.message-item:last-of-type');
+            if (lastMessage) {
+                this.lastMessageId = parseInt(lastMessage.dataset.messageId);
+            }
+
+            this.connect();
+
+            // 페이지 언로드 시 연결 종료
+            window.addEventListener('beforeunload', () => this.disconnect());
+
+            // 페이지 로드 시 스크롤을 맨 아래로 이동
+            this.scrollToBottom();
+        },
+
+        connect() {
+            if (!this.roomId) return;
+
+            this.connectionState = this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting';
+
+            // WebSocket URL 구성
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            let wsUrl = `${protocol}//${window.location.host}/ws/chat/${this.roomId}/`;
+
+            // 재연결 시 last_message_id 파라미터 추가
+            if (this.lastMessageId) {
+                wsUrl += `?last_message_id=${this.lastMessageId}`;
+            }
+
+            this.ws = new WebSocket(wsUrl);
+
+            this.ws.onopen = () => {
+                this.connectionState = 'connected';
+                this.reconnectAttempts = 0;
+                this.reconnectDelay = 1000;
+            };
+
+            this.ws.onclose = (event) => {
+                this.connectionState = 'disconnected';
+                this.handleReconnect(event.code);
+            };
+
+            this.ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            this.ws.onmessage = (event) => {
+                this.handleMessage(JSON.parse(event.data));
+            };
+        },
+
+        disconnect() {
+            if (this.ws) {
+                this.ws.close();
+                this.ws = null;
+            }
+        },
+
+        handleReconnect(closeCode) {
+            // 인증 오류는 재연결하지 않음
+            if (closeCode === 4001 || closeCode === 4003 || closeCode === 4004) {
+                return;
+            }
+
+            if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                console.error('Max reconnect attempts reached');
+                return;
+            }
+
+            this.reconnectAttempts++;
+            this.connectionState = 'reconnecting';
+
+            // Exponential Backoff with Jitter
+            const jitter = Math.random() * 1000; // 0-1초 랜덤
+            const delay = Math.min(this.reconnectDelay + jitter, this.maxReconnectDelay);
+
+            setTimeout(() => {
+                this.connect();
+            }, delay);
+
+            // 다음 재연결 시 지연 시간 증가 (계수 2)
+            this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
+        },
+
+        handleMessage(data) {
+            switch (data.type) {
+                case 'chat_message':
+                    this.handleChatMessage(data.message);
+                    break;
+                case 'message_ack':
+                    this.handleMessageAck(data);
+                    break;
+                case 'error':
+                    this.handleError(data);
+                    break;
+            }
+        },
+
+        handleChatMessage(message) {
+            // 이미 존재하는 메시지인지 확인 (중복 방지)
+            const existingInNew = this.messages.find(m => m.id === message.id);
+            const existingInDOM = document.querySelector(`[data-message-id="${message.id}"]`);
+
+            if (existingInNew || existingInDOM) {
+                return;
+            }
+
+            // 내가 보낸 메시지의 경우 pending 상태 업데이트
+            if (message.sender_id === this.userId) {
+                const pending = Object.values(this.pendingMessages).find(
+                    p => p.content === message.content && p.status === 'sending'
+                );
+                if (pending) {
+                    // pending 메시지 업데이트
+                    const index = this.messages.findIndex(m => m.clientId === pending.clientId);
+                    if (index !== -1) {
+                        this.messages[index] = {
+                            ...message,
+                            status: 'sent'
+                        };
+                        delete this.pendingMessages[pending.clientId];
+                        this.lastMessageId = message.id;
+                        this.scrollToBottom();
+                        return;
+                    }
+                }
+            }
+
+            // 새 메시지 추가
+            this.messages.push({
+                ...message,
+                status: 'received'
+            });
+            this.lastMessageId = message.id;
+            this.scrollToBottom();
+        },
+
+        handleMessageAck(data) {
+            const pending = this.pendingMessages[data.client_id];
+            if (pending) {
+                const index = this.messages.findIndex(m => m.clientId === data.client_id);
+                if (index !== -1) {
+                    this.messages[index].id = data.message_id;
+                    this.messages[index].status = 'sent';
+                }
+                delete this.pendingMessages[data.client_id];
+            }
+        },
+
+        handleError(data) {
+            console.error('Chat error:', data.code, data.message);
+            this.showError(data.message);
+        },
+
+        showError(message) {
+            this.errorMessage = message;
+
+            if (this.errorTimeout) {
+                clearTimeout(this.errorTimeout);
+            }
+            this.errorTimeout = setTimeout(() => {
+                this.errorMessage = null;
+            }, 3000);
+        },
+
+        sendMessage() {
+            const content = this.messageInput.trim();
+            if (!content || this.connectionState !== 'connected') return;
+
+            // 메시지 길이 검증
+            if (content.length > this.maxMessageLength) {
+                this.showError(`메시지는 ${this.maxMessageLength.toLocaleString()}자를 초과할 수 없습니다.`);
+                return;
+            }
+
+            // UUID 생성
+            const clientId = crypto.randomUUID();
+
+            // 메시지 전송
+            this.ws.send(JSON.stringify({
+                type: 'chat_message',
+                content: content,
+                client_id: clientId
+            }));
+
+            // Optimistic UI: 바로 화면에 표시
+            const now = new Date().toISOString();
+            const pendingMessage = {
+                clientId: clientId,
+                content: content,
+                sender_id: this.userId,
+                sender_name: this.userName,
+                created_at: now,
+                status: 'sending'
+            };
+
+            this.messages.push(pendingMessage);
+            this.pendingMessages[clientId] = pendingMessage;
+
+            // 입력 필드 초기화
+            this.messageInput = '';
+
+            // 스크롤
+            this.scrollToBottom();
+        },
+
+        scrollToBottom() {
+            this.$nextTick(() => {
+                const container = this.$refs.messagesContainer;
+                if (container) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            });
+        },
+
+        formatTime(isoString) {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            const hours = date.getHours();
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            const period = hours < 12 ? '오전' : '오후';
+            const displayHours = hours % 12 || 12;
+            return `${period} ${displayHours}:${minutes}`;
+        }
+    };
+}
+</script>
 {% endblock %}

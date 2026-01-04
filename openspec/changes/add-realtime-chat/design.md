@@ -17,7 +17,6 @@
 - 인증된 참여자만 WebSocket 연결 허용
 - Alpine.js로 프론트엔드 WebSocket 클라이언트 구현
 - 연결 끊김 시 자동 재연결 및 메시지 동기화
-- Rate Limiting으로 악용 방지
 
 **Non-Goals**:
 - 읽음 확인 (read receipts)
@@ -106,7 +105,6 @@ from channels.auth import AuthMiddlewareStack
 | 코드 | 설명 |
 |------|------|
 | EMPTY_MESSAGE | 빈 메시지 전송 시도 |
-| RATE_LIMITED | 전송 제한 초과 |
 | INVALID_FORMAT | JSON 파싱 실패 |
 
 **이유**:
@@ -121,7 +119,6 @@ from channels.auth import AuthMiddlewareStack
 | 4001 | Unauthorized | 비인증 사용자 연결 시도 |
 | 4003 | Forbidden | 비참여자 연결 시도 |
 | 4004 | Room Not Found | 존재하지 않는 대화방 |
-| 4029 | Rate Limited | 연결 수 제한 초과 |
 
 ### 6. 프론트엔드 구현
 
@@ -150,36 +147,7 @@ from channels.auth import AuthMiddlewareStack
 - 재연결 시 쿼리 파라미터로 `last_message_id` 전송
 - Consumer connect()에서 누락된 메시지 조회 후 순차 전송
 
-### 8. Rate Limiting
-
-**결정**: 사용자별 메시지 전송 제한
-
-**제한**:
-| 항목 | 값 |
-|------|-----|
-| 분당 최대 메시지 | 60개 |
-| 연속 전송 제한 | 1초당 5개 |
-
-**구현 방식**:
-- Redis를 활용한 sliding window counter
-- 제한 초과 시 에러 응답 + 재시도 대기 시간 안내
-
-### 9. Heartbeat (연결 상태 확인)
-
-**결정**: 서버 주도 Ping-Pong 방식
-
-**파라미터**:
-| 항목 | 값 |
-|------|-----|
-| Ping 주기 | 30초 |
-| Pong 타임아웃 | 10초 |
-
-**동작**:
-- 서버가 30초마다 ping 전송
-- 클라이언트가 10초 내 pong 미응답 시 연결 종료
-- 클라이언트 측에서도 연결 끊김 감지 후 재연결 시도
-
-### 10. 수평 확장 전략
+### 8. 수평 확장 전략
 
 **결정**: Redis Channel Layer를 통한 크로스 서버 메시지 라우팅
 
@@ -210,6 +178,5 @@ CHANNEL_LAYERS = {
 | WebSocket 연결 끊김 | Exponential backoff 재연결 + 메시지 동기화 |
 | 메시지 유실 | DB 저장 후 브로드캐스트 + 재연결 시 동기화 |
 | 비인증 접근 | AuthMiddlewareStack + connect()에서 검증, 실패 시 close(4001) |
-| 악의적 대량 전송 | Rate Limiting (분당 60개, 초당 5개) |
 | 좀비 연결 | Heartbeat ping-pong으로 감지 및 정리 |
 | 수평 확장 시 메시지 전달 | Redis Channel Layer 그룹 브로드캐스트 |

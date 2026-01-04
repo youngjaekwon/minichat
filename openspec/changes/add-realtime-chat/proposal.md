@@ -14,7 +14,6 @@
 
 **확장성 및 안정성**:
 - AuthMiddlewareStack 적용 (세션 기반 인증)
-- Rate Limiting (분당 60개, 초당 5개 제한)
 - Heartbeat ping-pong (30초 주기, 10초 타임아웃)
 - Exponential Backoff 재연결 (최대 10회, jitter 포함)
 - 재연결 시 메시지 동기화 (last_message_id 기반)
