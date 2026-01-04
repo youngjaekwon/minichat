@@ -341,3 +341,76 @@ class TestMessageManager:
                 sender=user,
                 content="",
             )
+
+
+@pytest.mark.django_db
+class TestMessageQuerySetSearch:
+    """MessageQuerySet.search() 테스트."""
+
+    def test_search_returns_matching_messages(self):
+        """검색어가 포함된 메시지만 반환한다."""
+        room = RoomFactory()
+        msg1 = MessageFactory(room=room, content="안녕하세요 반갑습니다")
+        msg2 = MessageFactory(room=room, content="오늘 날씨가 좋네요")
+        MessageFactory(room=room, content="다른 내용")
+
+        results = Message.objects.get_queryset().for_room(room).search("안녕")
+
+        assert results.count() == 1
+        assert msg1 in results
+        assert msg2 not in results
+
+    def test_search_case_insensitive(self):
+        """대소문자 구분 없이 검색한다."""
+        room = RoomFactory()
+        msg = MessageFactory(room=room, content="Hello World")
+
+        results = Message.objects.get_queryset().for_room(room).search("hello")
+
+        assert results.count() == 1
+        assert msg in results
+
+    def test_search_partial_match(self):
+        """부분 일치 검색을 지원한다."""
+        room = RoomFactory()
+        msg = MessageFactory(room=room, content="프로그래밍 공부하기")
+
+        results = Message.objects.get_queryset().for_room(room).search("프로그래")
+
+        assert results.count() == 1
+        assert msg in results
+
+    def test_search_no_results(self):
+        """검색 결과가 없으면 빈 QuerySet을 반환한다."""
+        room = RoomFactory()
+        MessageFactory(room=room, content="안녕하세요")
+
+        results = Message.objects.get_queryset().for_room(room).search("없는키워드")
+
+        assert results.count() == 0
+
+    def test_search_multiple_matches(self):
+        """여러 메시지가 검색될 수 있다."""
+        room = RoomFactory()
+        msg1 = MessageFactory(room=room, content="오늘 회의 있어요")
+        msg2 = MessageFactory(room=room, content="회의 자료 준비했습니다")
+        msg3 = MessageFactory(room=room, content="회의실 예약 완료")
+
+        results = Message.objects.get_queryset().for_room(room).search("회의")
+
+        assert results.count() == 3
+        assert msg1 in results
+        assert msg2 in results
+        assert msg3 in results
+
+    def test_search_scoped_to_room(self):
+        """검색은 해당 대화방 내에서만 수행된다."""
+        room1 = RoomFactory()
+        room2 = RoomFactory()
+        msg1 = MessageFactory(room=room1, content="테스트 메시지")
+        MessageFactory(room=room2, content="테스트 메시지")  # 다른 방
+
+        results = Message.objects.get_queryset().for_room(room1).search("테스트")
+
+        assert results.count() == 1
+        assert msg1 in results
