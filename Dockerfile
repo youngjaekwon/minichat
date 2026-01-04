@@ -24,6 +24,9 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --group prod
 
+# 정적 파일 수집
+RUN uv run python manage.py collectstatic --noinput
+
 EXPOSE 8000
 
-CMD ["uv", "run", "gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["sh", "-c", "uv run python manage.py migrate && uv run gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT"]
