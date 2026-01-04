@@ -298,6 +298,9 @@ class Room(models.Model):
         verbose_name = "대화방"
         verbose_name_plural = "대화방"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["updated_at"], name="room_updated_at_idx"),
+        ]
 
     def __str__(self) -> str:
         if self.is_direct:
@@ -579,6 +582,10 @@ class Message(models.Model):
                 fields=["content"],
                 opclasses=["gin_trgm_ops"],
             ),
+            models.Index(fields=["created_at"], name="message_created_at_idx"),
+            models.Index(
+                fields=["room", "-created_at"], name="message_room_created_desc_idx"
+            ),
         ]
 
     def __str__(self) -> str:
@@ -714,6 +721,51 @@ class MessageReadManager(models.Manager["MessageRead"]):
         )
 
         return {item["room_id"]: item["count"] for item in unread_counts}
+
+    def get_unread_counts_for_users(
+        self, room: Room, user_ids: list[int]
+    ) -> dict[int, int]:
+        """특정 채팅방에서 여러 사용자의 안읽은 메시지 수를 한 번에 조회한다.
+
+        broadcast_sidebar_update에서 N+1 문제를 해결하기 위해 사용.
+
+        Args:
+            room: 채팅방
+            user_ids: 사용자 ID 목록
+
+        Returns:
+            {user_id: unread_count} 딕셔너리
+        """
+        # 각 사용자별 읽은 메시지 수 집계
+        read_counts = dict(
+            self.filter(
+                message__room=room,
+                user_id__in=user_ids,
+            )
+            .values("user_id")
+            .annotate(count=Count("pk"))
+            .values_list("user_id", "count")
+        )
+
+        # 해당 방의 전체 메시지 수 (발신자별)
+        # 각 사용자가 보낸 메시지는 자신의 안읽은 수에서 제외해야 함
+        sent_counts = dict(
+            Message.objects.filter(room=room, sender_id__in=user_ids)
+            .values("sender_id")
+            .annotate(count=Count("pk"))
+            .values_list("sender_id", "count")
+        )
+
+        total_messages = Message.objects.filter(room=room).count()
+
+        result = {}
+        for user_id in user_ids:
+            # 안읽은 수 = 전체 메시지 - 내가 보낸 메시지 - 읽은 메시지
+            sent = sent_counts.get(user_id, 0)
+            read = read_counts.get(user_id, 0)
+            result[user_id] = max(0, total_messages - sent - read)
+
+        return result
 
 
 class MessageRead(models.Model):

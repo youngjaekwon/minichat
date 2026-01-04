@@ -76,17 +76,27 @@ def broadcast_sidebar_update(
     if not participant_ids:
         return
 
+    # Room을 조회
+    try:
+        room = Room.objects.get(pk=room_id)
+    except Room.DoesNotExist:
+        logger.warning(
+            "broadcast_sidebar_update_failed",
+            reason="room_not_found",
+            room_id=room_id,
+        )
+        return
+
+    # 모든 참여자의 안읽은 메시지 수를 조회
+    unread_counts = MessageRead.objects.get_unread_counts_for_users(
+        room, participant_ids
+    )
+
     channel_layer = get_channel_layer()
 
     # 각 참여자에게 개인화된 안읽은 메시지 수와 함께 전송
     for user_id in participant_ids:
-        # 해당 사용자의 안읽은 메시지 수 조회
-        try:
-            room = Room.objects.get(pk=room_id)
-            user = User.objects.get(pk=user_id)
-            unread_count = MessageRead.objects.get_unread_count(room, user)
-        except (Room.DoesNotExist, User.DoesNotExist):
-            unread_count = 0
+        unread_count = unread_counts.get(user_id, 0)
 
         sidebar_msg = SidebarUpdateMessage(
             room=SidebarRoomPayload(

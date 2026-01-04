@@ -5,7 +5,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.chat.models import Message, Room
+from apps.chat.models import Message, MessageRead, Room
 from apps.chat.permissions import IsRoomParticipant
 from apps.chat.serializers import (
     MessageDirection,
@@ -284,10 +284,18 @@ class RoomListAPIView(APIView):
             limit=limit,
         )
 
+        # 모든 방의 안읽은 메시지 수를 조회
+        unread_counts = MessageRead.objects.get_unread_counts_for_rooms(
+            rooms, request.user
+        )
+
         serializer = RoomSerializer(
             rooms,
             many=True,
-            context={"user": request.user},
+            context={
+                "user": request.user,
+                "unread_counts": unread_counts,
+            },
         )
 
         logger.info(
@@ -297,11 +305,13 @@ class RoomListAPIView(APIView):
             has_more=has_more,
         )
 
-        return Response({
-            "rooms": serializer.data,
-            "has_more": has_more,
-            "next_cursor": next_cursor,
-        })
+        return Response(
+            {
+                "rooms": serializer.data,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            }
+        )
 
 
 class RoomSearchAPIView(APIView):
@@ -355,8 +365,10 @@ class RoomSearchAPIView(APIView):
             has_more=has_more,
         )
 
-        return Response({
-            "rooms": serializer.data,
-            "has_more": has_more,
-            "next_cursor": next_cursor,
-        })
+        return Response(
+            {
+                "rooms": serializer.data,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            }
+        )

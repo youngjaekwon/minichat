@@ -82,7 +82,8 @@ class RoomDetailView(LoginRequiredMixin, DetailView):
             context["display_name"] = room.name
 
         # 참여자 수 (프론트엔드에서 unread_count 초기값 계산용)
-        context["participant_count"] = room.participants.count()
+        # participant_count 필드 사용 (N+1 방지)
+        context["participant_count"] = room.participant_count
 
         return context
 
