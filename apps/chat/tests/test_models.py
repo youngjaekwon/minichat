@@ -5,12 +5,12 @@ Chat 모델 테스트
 from concurrent.futures import ThreadPoolExecutor
 
 from django.core.exceptions import ValidationError
-from django.db import connection
+from django.db import IntegrityError, connection
 
 import pytest
 
-from apps.chat.models import Message, Room
-from tests.factories import MessageFactory, RoomFactory, UserFactory
+from apps.chat.models import Message, MessageRead, Room
+from tests.factories import MessageFactory, MessageReadFactory, RoomFactory, UserFactory
 
 
 @pytest.mark.django_db
@@ -154,11 +154,11 @@ class TestMessageModel:
         """메시지 미리보기 테스트."""
         room = RoomFactory()
         short_message = MessageFactory(room=room, content="짧은 메시지")
-        long_content = "가" * 60  # 60자 메시지
+        long_content = "가" * 30  # 30자 메시지
         long_message = MessageFactory(room=room, content=long_content)
 
         assert short_message.get_preview() == "짧은 메시지"
-        assert len(long_message.get_preview()) == 53  # 50자 + "..."
+        assert len(long_message.get_preview()) == 23  # 20자 + "..."
         assert long_message.get_preview().endswith("...")
 
 
@@ -414,3 +414,300 @@ class TestMessageQuerySetSearch:
 
         assert results.count() == 1
         assert msg1 in results
+
+
+@pytest.mark.django_db
+class TestMessageReadModel:
+    """MessageRead 모델 테스트."""
+
+    def test_create_message_read(self):
+        """MessageRead 생성 테스트."""
+        room = RoomFactory()
+        user = UserFactory()
+        room.participants.add(user)
+        message = MessageFactory(room=room, sender=room.created_by)
+
+        message_read = MessageReadFactory(message=message, user=user)
+
+        assert message_read.message == message
+        assert message_read.user == user
+        assert message_read.read_at is not None
+
+    def test_unique_constraint(self):
+        """같은 메시지를 같은 사용자가 두 번 읽을 수 없다."""
+        room = RoomFactory()
+        user = UserFactory()
+        room.participants.add(user)
+        message = MessageFactory(room=room, sender=room.created_by)
+
+        MessageReadFactory(message=message, user=user)
+
+        with pytest.raises(IntegrityError):
+            MessageReadFactory(message=message, user=user)
+
+    def test_str_representation(self):
+        """__str__ 메서드 테스트."""
+        room = RoomFactory()
+        user = UserFactory(name="테스트유저")
+        room.participants.add(user)
+        message = MessageFactory(room=room, sender=room.created_by)
+
+        message_read = MessageReadFactory(message=message, user=user)
+
+        assert str(user) in str(message_read)
+
+
+@pytest.mark.django_db
+class TestMessageReadManager:
+    """MessageReadManager 테스트."""
+
+    def test_mark_as_read_creates_records(self):
+        """안읽은 메시지를 읽음 처리한다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        # user1이 보낸 메시지 3개
+        msg1 = MessageFactory(room=room, sender=user1, content="메시지1")
+        msg2 = MessageFactory(room=room, sender=user1, content="메시지2")
+        msg3 = MessageFactory(room=room, sender=user1, content="메시지3")
+
+        # user2가 읽음 처리
+        message_ids, sender_ids = MessageRead.objects.mark_as_read(room, user2)
+
+        assert len(message_ids) == 3
+        assert msg1.pk in message_ids
+        assert msg2.pk in message_ids
+        assert msg3.pk in message_ids
+        assert user1.pk in sender_ids
+
+        # MessageRead 레코드 확인
+        assert MessageRead.objects.filter(user=user2).count() == 3
+
+    def test_mark_as_read_excludes_own_messages(self):
+        """자신이 보낸 메시지는 읽음 처리하지 않는다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        # user1이 보낸 메시지
+        MessageFactory(room=room, sender=user1, content="user1 메시지")
+        # user2가 보낸 메시지
+        MessageFactory(room=room, sender=user2, content="user2 메시지")
+
+        # user2가 읽음 처리 (자신의 메시지는 제외)
+        message_ids, _ = MessageRead.objects.mark_as_read(room, user2)
+
+        assert len(message_ids) == 1
+        assert MessageRead.objects.filter(user=user2).count() == 1
+
+    def test_mark_as_read_excludes_already_read(self):
+        """이미 읽은 메시지는 다시 처리하지 않는다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        msg1 = MessageFactory(room=room, sender=user1, content="메시지1")
+        MessageFactory(room=room, sender=user1, content="메시지2")
+
+        # msg1만 미리 읽음 처리
+        MessageReadFactory(message=msg1, user=user2)
+
+        # user2가 읽음 처리
+        message_ids, _ = MessageRead.objects.mark_as_read(room, user2)
+
+        # 새로 읽음 처리된 것은 1개
+        assert len(message_ids) == 1
+        # 총 읽음 기록은 2개
+        assert MessageRead.objects.filter(user=user2).count() == 2
+
+    def test_mark_as_read_no_unread_messages(self):
+        """안읽은 메시지가 없으면 빈 리스트를 반환한다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        message_ids, sender_ids = MessageRead.objects.mark_as_read(room, user2)
+
+        assert message_ids == []
+        assert sender_ids == []
+
+    def test_get_unread_count(self):
+        """안읽은 메시지 수를 반환한다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        # user1이 보낸 메시지 3개
+        MessageFactory(room=room, sender=user1, content="메시지1")
+        MessageFactory(room=room, sender=user1, content="메시지2")
+        MessageFactory(room=room, sender=user1, content="메시지3")
+
+        count = MessageRead.objects.get_unread_count(room, user2)
+
+        assert count == 3
+
+    def test_get_unread_count_excludes_own_messages(self):
+        """자신이 보낸 메시지는 안읽은 수에 포함되지 않는다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        # user1이 보낸 메시지 2개
+        MessageFactory(room=room, sender=user1, content="user1 메시지1")
+        MessageFactory(room=room, sender=user1, content="user1 메시지2")
+        # user2가 보낸 메시지 1개
+        MessageFactory(room=room, sender=user2, content="user2 메시지")
+
+        # user2 기준 안읽은 수 (자신의 메시지 제외)
+        count = MessageRead.objects.get_unread_count(room, user2)
+
+        assert count == 2
+
+    def test_get_unread_count_excludes_read_messages(self):
+        """읽은 메시지는 안읽은 수에 포함되지 않는다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        msg1 = MessageFactory(room=room, sender=user1, content="메시지1")
+        MessageFactory(room=room, sender=user1, content="메시지2")
+
+        # msg1만 읽음 처리
+        MessageReadFactory(message=msg1, user=user2)
+
+        count = MessageRead.objects.get_unread_count(room, user2)
+
+        assert count == 1
+
+    def test_get_unread_counts_for_rooms(self):
+        """여러 채팅방의 안읽은 메시지 수를 한 번에 조회한다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        user3 = UserFactory()
+
+        room1 = RoomFactory(created_by=user1, participants=[user2])
+        room2 = RoomFactory(created_by=user1, participants=[user2, user3])
+
+        # room1: user1이 보낸 메시지 2개
+        MessageFactory(room=room1, sender=user1, content="room1 메시지1")
+        MessageFactory(room=room1, sender=user1, content="room1 메시지2")
+
+        # room2: user1이 보낸 메시지 3개
+        msg = MessageFactory(room=room2, sender=user1, content="room2 메시지1")
+        MessageFactory(room=room2, sender=user1, content="room2 메시지2")
+        MessageFactory(room=room2, sender=user1, content="room2 메시지3")
+
+        # user2가 참여한 방만 조회 (실제 사용 패턴)
+        rooms_user2 = Room.objects.get_by_user(user2)
+        counts_user2 = MessageRead.objects.get_unread_counts_for_rooms(rooms_user2, user2)
+
+        assert counts_user2.get(room1.pk, 0) == 2
+        assert counts_user2.get(room2.pk, 0) == 3
+
+        # user2가 room2의 메시지 1개를 읽음
+        MessageReadFactory(message=msg, user=user2)
+
+        counts_user2 = MessageRead.objects.get_unread_counts_for_rooms(rooms_user2, user2)
+        assert counts_user2.get(room2.pk, 0) == 2  # 3 - 1 = 2
+
+        # user3 기준 (room2만 참여)
+        rooms_user3 = Room.objects.get_by_user(user3)
+        counts_user3 = MessageRead.objects.get_unread_counts_for_rooms(rooms_user3, user3)
+
+        assert counts_user3.get(room1.pk, 0) == 0  # room1에 참여 안 함
+        assert counts_user3.get(room2.pk, 0) == 3
+
+
+@pytest.mark.django_db
+class TestMessageQuerySetWithUnreadCount:
+    """MessageQuerySet.with_unread_count() 테스트."""
+
+    def test_with_unread_count_new_message(self):
+        """새 메시지의 unread_count는 참여자수 - 1 (발신자 제외)."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        message = MessageFactory(room=room, sender=user1, content="테스트")
+
+        messages = list(Message.objects.filter(pk=message.pk).with_unread_count())
+
+        assert len(messages) == 1
+        # 참여자 2명, 읽은 사람 0명, 발신자 제외 = 2 - 0 - 1 = 1
+        assert messages[0].unread_count == 1
+
+    def test_with_unread_count_after_read(self):
+        """읽음 처리 후 unread_count가 감소한다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        message = MessageFactory(room=room, sender=user1, content="테스트")
+
+        # user2가 읽음 처리
+        MessageReadFactory(message=message, user=user2)
+
+        messages = list(Message.objects.filter(pk=message.pk).with_unread_count())
+
+        assert len(messages) == 1
+        # 참여자 2명, 읽은 사람 1명, 발신자 제외 = 2 - 1 - 1 = 0
+        assert messages[0].unread_count == 0
+
+    def test_with_unread_count_group_chat(self):
+        """그룹 채팅에서 unread_count 계산."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        user3 = UserFactory()
+        room = RoomFactory(
+            name="그룹",
+            is_direct=False,
+            created_by=user1,
+            participants=[user2, user3],
+        )
+
+        message = MessageFactory(room=room, sender=user1, content="테스트")
+
+        messages = list(Message.objects.filter(pk=message.pk).with_unread_count())
+
+        # 참여자 3명, 읽은 사람 0명, 발신자 제외 = 3 - 0 - 1 = 2
+        assert messages[0].unread_count == 2
+
+        # user2가 읽음
+        MessageReadFactory(message=message, user=user2)
+
+        messages = list(Message.objects.filter(pk=message.pk).with_unread_count())
+
+        # 참여자 3명, 읽은 사람 1명, 발신자 제외 = 3 - 1 - 1 = 1
+        assert messages[0].unread_count == 1
+
+        # user3도 읽음
+        MessageReadFactory(message=message, user=user3)
+
+        messages = list(Message.objects.filter(pk=message.pk).with_unread_count())
+
+        # 참여자 3명, 읽은 사람 2명, 발신자 제외 = 3 - 2 - 1 = 0
+        assert messages[0].unread_count == 0
+
+    def test_with_unread_count_multiple_messages(self):
+        """여러 메시지의 unread_count를 한 번에 조회한다."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        room = RoomFactory(created_by=user1, participants=[user2])
+
+        msg1 = MessageFactory(room=room, sender=user1, content="메시지1")
+        msg2 = MessageFactory(room=room, sender=user1, content="메시지2")
+        msg3 = MessageFactory(room=room, sender=user1, content="메시지3")
+
+        # msg1만 읽음 처리
+        MessageReadFactory(message=msg1, user=user2)
+
+        messages = list(
+            Message.objects.filter(pk__in=[msg1.pk, msg2.pk, msg3.pk])
+            .with_unread_count()
+            .order_by("pk")
+        )
+
+        assert messages[0].unread_count == 0  # msg1: 읽음
+        assert messages[1].unread_count == 1  # msg2: 안읽음
+        assert messages[2].unread_count == 1  # msg3: 안읽음

@@ -4,6 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=config.settings.production \
     DJANGO_ENV_FILE=env.production
 
@@ -14,16 +16,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 의존성 설치 (캐싱 최적화)
+# 의존성 설치
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --group prod
+RUN uv sync --frozen --no-install-project --group prod
 
 # 프로젝트 복사 및 설치
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --group prod
+RUN uv sync --frozen --group prod
+
+# entrypoint 스크립트 실행 권한 부여
+RUN chmod +x /app/entrypoint.sh
+
+# 정적 파일 수집
+RUN python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
-CMD ["uv", "run", "gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["sh", "-c", "gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers $WEB_CONCURRENCY --access-logfile - --error-logfile - --capture-output --log-level info"]

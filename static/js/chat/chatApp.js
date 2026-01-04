@@ -13,14 +13,16 @@ import { createScrollManager } from './modules/scroll.js';
  * @param {number|null} roomId - 채팅방 ID
  * @param {number} userId - 사용자 ID
  * @param {string} userName - 사용자 이름
+ * @param {number} participantCount - 참여자 수
  * @returns {Object} Alpine.js 컴포넌트 객체
  */
-export default function chatApp(roomId, userId, userName) {
+export default function chatApp(roomId, userId, userName, participantCount) {
     return {
         // 설정
         roomId: roomId,
         userId: userId,
         userName: userName,
+        participantCount: participantCount,
         maxMessageLength: 10000,
 
         // 채팅방 목록 상태
@@ -88,6 +90,9 @@ export default function chatApp(roomId, userId, userName) {
         searchPerformed: false,
         searchError: '',
 
+        // 사이드바 채팅방 정보 (실시간 업데이트용)
+        sidebarRooms: {},
+
         // 매니저 인스턴스
         wsManager: null,
         messageManager: null,
@@ -106,8 +111,17 @@ export default function chatApp(roomId, userId, userName) {
                 if (window.innerWidth < 768) {
                     this.sidebarOpen = true;
                 }
+                // 사이드바 업데이트를 위한 WebSocket 연결 (room 없이)
+                this.wsManager = createWebSocketManager(this);
+                this.wsManager.connectSidebarOnly();
+
+                // 페이지 언로드 시 연결 종료
+                window.addEventListener('beforeunload', () => this.disconnect());
                 return;
             }
+
+            // 현재 보고 있는 채팅방의 unread_count를 0으로 설정
+            this.clearCurrentRoomUnreadCount();
 
             // 매니저 초기화
             this.wsManager = createWebSocketManager(this);
@@ -400,6 +414,54 @@ export default function chatApp(roomId, userId, userName) {
          */
         scrollToBottomAndHideToast() {
             this.scrollManager?.scrollToBottomAndHideToast();
+        },
+
+        // ==================== 사이드바 업데이트 ====================
+
+        /**
+         * 현재 보고 있는 채팅방의 unread_count를 0으로 설정
+         */
+        clearCurrentRoomUnreadCount() {
+            if (!this.roomId) return;
+
+            const currentRoom = this.rooms.find((r) => r.id === this.roomId);
+            if (currentRoom) {
+                currentRoom.unread_count = 0;
+            }
+        },
+
+        /**
+         * 사이드바 업데이트 처리
+         * @param {Object} room - 채팅방 정보 (room_id, last_message, last_message_time, unread_count)
+         */
+        handleSidebarUpdate(room) {
+            // rooms 배열에서 해당 room 찾아서 업데이트
+            const existingRoom = this.rooms.find((r) => r.id === room.room_id);
+            if (existingRoom) {
+                // 현재 보고 있는 방이 아닌 경우에만 unread_count 업데이트
+                if (room.room_id !== this.roomId) {
+                    existingRoom.unread_count = room.unread_count;
+                }
+                existingRoom.last_message_preview = room.last_message;
+                existingRoom.updated_at = room.last_message_time;
+                existingRoom.is_today = true; // 새 메시지가 오면 오늘
+
+                // 채팅방을 맨 위로 이동 (검색 모드가 아닐 때)
+                if (!this.isSidebarSearchMode) {
+                    const index = this.rooms.indexOf(existingRoom);
+                    if (index > 0) {
+                        this.rooms.splice(index, 1);
+                        this.rooms.unshift(existingRoom);
+                    }
+                }
+            }
+
+            // sidebarRooms에도 저장 (추후 사용 가능)
+            this.sidebarRooms[room.room_id] = {
+                lastMessage: room.last_message,
+                lastMessageTime: room.last_message_time,
+                unreadCount: room.unread_count,
+            };
         },
 
         // ==================== 유틸리티 ====================
