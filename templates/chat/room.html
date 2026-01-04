@@ -1368,8 +1368,17 @@ function chatApp(roomId, userId, userName) {
                     // 스크롤
                     messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                    // 하이라이트 클래스 추가
-                    messageEl.classList.add('search-highlight');
+                    // 버블 요소 찾기 (rounded-lg 클래스를 가진 요소)
+                    const bubbleEl = messageEl.querySelector('.rounded-lg');
+                    if (bubbleEl) {
+                        // Tailwind 하이라이트 클래스 추가
+                        bubbleEl.classList.add('ring-2', 'ring-blue-500', 'border-blue-500', 'animate-pulse');
+
+                        // 2초 후 하이라이트 제거
+                        setTimeout(() => {
+                            bubbleEl.classList.remove('ring-2', 'ring-blue-500', 'border-blue-500', 'animate-pulse');
+                        }, 2000);
+                    }
                 }
             });
         },
@@ -1379,7 +1388,10 @@ function chatApp(roomId, userId, userName) {
             if (this.highlightedMessageId) {
                 const prevEl = document.querySelector(`[data-message-id="${this.highlightedMessageId}"]`);
                 if (prevEl) {
-                    prevEl.classList.remove('search-highlight');
+                    const bubbleEl = prevEl.querySelector('.rounded-lg');
+                    if (bubbleEl) {
+                        bubbleEl.classList.remove('ring-2', 'ring-blue-500', 'border-blue-500', 'animate-pulse');
+                    }
                 }
                 this.highlightedMessageId = null;
             }
@@ -1387,23 +1399,4 @@ function chatApp(roomId, userId, userName) {
     };
 }
 </script>
-
-<style>
-    .search-highlight > div > div {
-        animation: highlight-pulse 2s ease-in-out;
-        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
-        border-color: rgb(59, 130, 246) !important;
-    }
-
-    @keyframes highlight-pulse {
-        0%, 100% {
-            box-shadow: none;
-            border-color: rgb(229, 231, 235);
-        }
-        20%, 80% {
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
-            border-color: rgb(59, 130, 246);
-        }
-    }
-</style>
 {% endblock %}
