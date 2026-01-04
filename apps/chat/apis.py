@@ -73,22 +73,29 @@ class MessageListAPIView(APIView):
             room_id=self.room.pk,
             user_id=self.request.user.pk,
             count=len(messages),
-            has_more=has_more,
+            has_more_before=has_more,
+            has_more_after=False,
         )
 
         return Response(
             {
                 "messages": MessageSerializer(messages, many=True).data,
-                "has_more": has_more,
-                "next_cursor": messages[0].pk if messages and has_more else None,
+                "has_more_before": has_more,
+                "has_more_after": False,  # 최신 메시지이므로 이후 없음
+                "next_cursor_before": messages[0].pk if messages and has_more else None,
+                "next_cursor_after": None,
             }
         )
 
     def _get_messages_before(self, cursor_id: int, limit: int) -> Response:
         """이전 메시지 조회 (스크롤 업)."""
-        messages, has_more = Message.objects.get_messages_before(
+        messages, has_more_before = Message.objects.get_messages_before(
             room=self.room, cursor_id=cursor_id, limit=limit
         )
+        # cursor_id 이후에 메시지가 있는지 확인
+        has_more_after = Message.objects.filter(
+            room=self.room, pk__gt=cursor_id
+        ).exists()
 
         logger.info(
             "messages_loaded",
@@ -97,22 +104,33 @@ class MessageListAPIView(APIView):
             user_id=self.request.user.pk,
             cursor_id=cursor_id,
             count=len(messages),
-            has_more=has_more,
+            has_more_before=has_more_before,
+            has_more_after=has_more_after,
         )
 
         return Response(
             {
                 "messages": MessageSerializer(messages, many=True).data,
-                "has_more": has_more,
-                "next_cursor": messages[0].pk if messages and has_more else None,
+                "has_more_before": has_more_before,
+                "has_more_after": has_more_after,
+                "next_cursor_before": messages[0].pk
+                if messages and has_more_before
+                else None,
+                "next_cursor_after": messages[-1].pk
+                if messages and has_more_after
+                else None,
             }
         )
 
     def _get_messages_after(self, cursor_id: int, limit: int) -> Response:
         """이후 메시지 조회 (스크롤 다운)."""
-        messages, has_more = Message.objects.get_messages_after(
+        messages, has_more_after = Message.objects.get_messages_after(
             room=self.room, cursor_id=cursor_id, limit=limit
         )
+        # cursor_id 이전에 메시지가 있는지 확인
+        has_more_before = Message.objects.filter(
+            room=self.room, pk__lt=cursor_id
+        ).exists()
 
         logger.info(
             "messages_loaded",
@@ -121,14 +139,21 @@ class MessageListAPIView(APIView):
             user_id=self.request.user.pk,
             cursor_id=cursor_id,
             count=len(messages),
-            has_more=has_more,
+            has_more_before=has_more_before,
+            has_more_after=has_more_after,
         )
 
         return Response(
             {
                 "messages": MessageSerializer(messages, many=True).data,
-                "has_more": has_more,
-                "next_cursor": messages[-1].pk if messages and has_more else None,
+                "has_more_before": has_more_before,
+                "has_more_after": has_more_after,
+                "next_cursor_before": messages[0].pk
+                if messages and has_more_before
+                else None,
+                "next_cursor_after": messages[-1].pk
+                if messages and has_more_after
+                else None,
             }
         )
 
@@ -160,7 +185,6 @@ class MessageListAPIView(APIView):
                 "next_cursor_after": messages[-1].pk
                 if messages and has_more_after
                 else None,
-                "target_message_id": cursor_id,
             }
         )
 

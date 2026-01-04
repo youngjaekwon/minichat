@@ -498,8 +498,8 @@ function chatApp(roomId, userId, userName) {
                 if (data.messages && data.messages.length > 0) {
                     // 날짜 구분선 처리 포함하여 메시지 설정
                     this.oldMessages = this.processInitialMessages(data.messages);
-                    this.hasMore = data.has_more;
-                    this.oldestMessageId = data.next_cursor;
+                    this.hasMore = data.has_more_before;
+                    this.oldestMessageId = data.next_cursor_before;
 
                     // 마지막 메시지 ID와 날짜 설정
                     const lastMsg = data.messages[data.messages.length - 1];
@@ -598,8 +598,8 @@ function chatApp(roomId, userId, userName) {
                     this.oldMessages = [...processedMessages, ...this.oldMessages];
 
                     // 가장 오래된 메시지 ID 업데이트
-                    this.oldestMessageId = data.next_cursor;
-                    this.hasMore = data.has_more;
+                    this.oldestMessageId = data.next_cursor_before;
+                    this.hasMore = data.has_more_before;
 
                     // 스크롤 위치 유지
                     this.$nextTick(() => {
@@ -671,8 +671,8 @@ function chatApp(roomId, userId, userName) {
                     this.messages = [...this.messages, ...processedMessages];
 
                     // 가장 최신 메시지 ID 업데이트
-                    this.newestMessageId = data.next_cursor || data.messages[data.messages.length - 1].id;
-                    this.hasMoreAfter = data.has_more;
+                    this.newestMessageId = data.next_cursor_after;
+                    this.hasMoreAfter = data.has_more_after;
 
                     // 더 이상 로드할 메시지가 없으면 최신 상태로 설정
                     if (!this.hasMoreAfter) {
@@ -1277,10 +1277,8 @@ function chatApp(roomId, userId, userName) {
                     // 상하 페이지네이션 상태 업데이트
                     this.hasMore = data.has_more_before;
                     this.hasMoreAfter = data.has_more_after;
-                    if (data.messages.length > 0) {
-                        this.oldestMessageId = data.messages[0].id;
-                        this.newestMessageId = data.messages[data.messages.length - 1].id;
-                    }
+                    this.oldestMessageId = data.next_cursor_before;
+                    this.newestMessageId = data.next_cursor_after;
 
                     // 최신 상태가 아님을 표시
                     this.isAtLatest = !data.has_more_after;
