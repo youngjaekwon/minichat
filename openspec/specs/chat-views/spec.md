@@ -23,15 +23,17 @@ TBD - created by archiving change add-chat-room-basics. Update Purpose after arc
 
 - URL: `/chat/`
 - 대화 목록을 최근 업데이트 순으로 표시
-- 각 대화 항목에 표시: 대화 상대/이름, 마지막 메시지 미리보기, 시간/날짜
+- 각 대화 항목에 표시: 대화 상대/이름, 마지막 메시지 미리보기, 시간/날짜, **안읽은 메시지 수 배지**
 - 1:1 대화: 상대방 이름으로 표시
 - 그룹 대화: 대화방 이름으로 표시
+- **사이드바는 Alpine.js로 동적 관리되어 실시간 업데이트 지원**
 
 #### Scenario: 대화 목록 조회
 
 - **WHEN** 로그인 사용자가 `/chat/`에 접근하면
 - **THEN** 참여 중인 대화 목록이 표시되어야 한다
 - **AND** 최근 업데이트 순으로 정렬되어야 한다
+- **AND** 각 대화방의 안읽은 메시지 수가 배지로 표시되어야 한다
 
 #### Scenario: 대화가 없는 경우
 
@@ -48,6 +50,17 @@ TBD - created by archiving change add-chat-room-basics. Update Purpose after arc
 - **WHEN** 대화 목록이 표시될 때
 - **THEN** 오늘 메시지는 시간만, 이전 메시지는 날짜로 표시되어야 한다
 
+#### Scenario: 안읽은 메시지 배지 표시
+
+- **WHEN** 대화방에 안읽은 메시지가 있으면
+- **THEN** 해당 대화방 항목에 빨간색 원형 배지로 안읽은 수가 표시되어야 한다
+- **AND** 99개 초과 시 "99+"로 표시되어야 한다
+
+#### Scenario: 안읽은 메시지가 없는 경우
+
+- **WHEN** 대화방의 모든 메시지를 읽었으면
+- **THEN** 배지가 표시되지 않아야 한다
+
 ### Requirement: Room Detail Page
 
 시스템은 대화방의 메시지 목록과 입력 폼을 표시하는 페이지를 제공해야 한다(SHALL).
@@ -57,6 +70,7 @@ TBD - created by archiving change add-chat-room-basics. Update Purpose after arc
 - 메시지 목록 (시간순)
 - 날짜별 구분선
 - 메시지 입력 폼
+- **내 메시지에 안읽은 인원 수 표시 (카카오톡 방식)**
 
 #### Scenario: 대화 상세 조회
 
@@ -78,6 +92,18 @@ TBD - created by archiving change add-chat-room-basics. Update Purpose after arc
 
 - **WHEN** 다른 날짜의 메시지들이 있을 때
 - **THEN** 날짜별로 구분선이 표시되어야 한다
+
+#### Scenario: 내 메시지 안읽은 인원 수 표시
+
+- **WHEN** 내가 보낸 메시지가 표시될 때
+- **THEN** 안읽은 인원 수가 메시지 옆에 숫자로 표시되어야 한다
+- **AND** 모든 참여자가 읽으면 숫자가 표시되지 않아야 한다
+
+#### Scenario: 안읽은 인원 수 실시간 업데이트
+
+- **WHEN** 상대방이 메시지를 읽으면
+- **THEN** 해당 메시지의 안읽은 인원 수가 실시간으로 감소해야 한다
+- **AND** 모든 참여자가 읽으면 숫자가 사라져야 한다
 
 ### Requirement: Send Message
 
